@@ -135,7 +135,7 @@ export class MolabClient {
     return this.#call(Experiment, "POST", `/api/projects/${seg(project)}/experiments`, body);
   }
 
-  createRun(project: string, experiment: string, body: { params: Record<string, unknown>; target?: string }): Promise<Run> {
+  createRun(project: string, experiment: string, body: { params: Record<string, unknown>; inputs?: string[]; target?: string }): Promise<Run> {
     return this.#call(Run, "POST", `/api/projects/${seg(project)}/experiments/${seg(experiment)}/runs`, body);
   }
 

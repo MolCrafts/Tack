@@ -64,7 +64,7 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
 
 export async function startFakeMolab(root = "/tmp/fake-ws/projects/polymer"): Promise<FakeMolab> {
   const experiments = new Map<string, { id: string; projectId: string; name: string; path: string; ref: string; parameterSpace: Record<string, unknown> }>();
-  const runs = new Map<string, { id: string; name: string; path: string; projectId: string; experimentId: string; parameters: Record<string, unknown> }>();
+  const runs = new Map<string, { id: string; name: string; path: string; projectId: string; experimentId: string; parameters: Record<string, unknown>; inputs: string[] }>();
   const executions = new Map<string, FakeExecution[]>();
   const docs = new Map<string, FakeDoc>();
   const requests: string[] = [];
@@ -81,11 +81,11 @@ export async function startFakeMolab(root = "/tmp/fake-ws/projects/polymer"): Pr
     experiments.set(id, experiment);
     return experiment;
   };
-  const addRun = (experimentId: string, parameters: Record<string, unknown>) => {
+  const addRun = (experimentId: string, parameters: Record<string, unknown>, inputs: string[] = []) => {
     const experiment = experiments.get(experimentId)!;
     const id = `R${++counter}`;
     const name = Object.entries(parameters).map(([k, v]) => `${k}=${String(v)}`).join("_") || id;
-    const run = { id, name, path: `${experiment.path}/runs/${name}`, projectId: PROJECT, experimentId, parameters };
+    const run = { id, name, path: `${experiment.path}/runs/${name}`, projectId: PROJECT, experimentId, parameters, inputs };
     runs.set(id, run);
     executions.set(id, []);
     return run;
@@ -139,7 +139,7 @@ export async function startFakeMolab(root = "/tmp/fake-ws/projects/polymer"): Pr
     }
     if ((m = path.match(/^\/api\/projects\/([^/]+)\/experiments\/([^/]+)\/runs$/)) && method === "POST") {
       if (!experiments.has(m[2]!)) return fail(404, "experiment not found");
-      return send(201, addRun(m[2]!, (body?.params as Record<string, unknown>) ?? {}));
+      return send(201, addRun(m[2]!, (body?.params as Record<string, unknown>) ?? {}, (body?.inputs as string[]) ?? []));
     }
     if ((m = path.match(/^\/api\/projects\/([^/]+)\/experiments\/([^/]+)\/runs\/([^/]+)(\/.*)?$/))) {
       const run = runs.get(m[3]!);

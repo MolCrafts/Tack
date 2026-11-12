@@ -6,7 +6,7 @@
  * one-shot approval.
  */
 import { MolabError } from "../molab/client.js";
-import { executionRef, runRef } from "../molab/refs.js";
+import { assetIdOf, executionRef, runRef } from "../molab/refs.js";
 import type { DryRun } from "../molab/schemas.js";
 import { type ApprovalOutcome, clipJson, type ResearchDeps, type ToolSpec } from "./types.js";
 
@@ -96,19 +96,29 @@ export function molabCreateExperiment(deps: ResearchDeps): ToolSpec<CreateExperi
   };
 }
 
-export function molabCreateRun(deps: ResearchDeps): ToolSpec<{ project: string; experiment: string; params: Record<string, unknown>; target?: string }> {
+export function molabCreateRun(deps: ResearchDeps): ToolSpec<{ project: string; experiment: string; params: Record<string, unknown>; inputs?: string[]; target?: string }> {
   return {
     name: "molab_create_run",
     description:
-      "Create a run in an experiment: one set of declared parameters (including the seed). A retry of a failed attempt is not a new run; start a new attempt with molab_start_execution instead.",
+      "Create a run in an experiment: one set of declared parameters (including the seed) and the registered assets it consumes. A retry of a failed attempt is not a new run; start a new attempt with molab_start_execution instead.",
     parameters: {
       project: { type: "string", required: true },
       experiment: { type: "string", required: true },
       params: { type: "json", required: true, description: "Run parameters." },
+      inputs: {
+        type: "array",
+        items: { type: "string" },
+        description: "molab:asset/<id> refs of registered assets this run consumes (another run's products); molab binds them into the root task as paths.",
+      },
       target: { type: "string", description: "Compute target hint." },
     },
     async execute(args) {
-      const run = await deps.molab.createRun(args.project, args.experiment, { params: args.params, ...(args.target !== undefined && { target: args.target }) });
+      const inputs = (args.inputs ?? []).map(assetIdOf);
+      const run = await deps.molab.createRun(args.project, args.experiment, {
+        params: args.params,
+        ...(inputs.length > 0 && { inputs }),
+        ...(args.target !== undefined && { target: args.target }),
+      });
       return { text: `Created run ${run.name} (${run.id}), ref ${runRef(args.experiment, run.id)}.`, meta: run };
     },
   };

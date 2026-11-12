@@ -14,6 +14,12 @@ const ASSET_REF = /^molab:asset\/[^/\s]+$/;
 /** Whether `ref` names a registered asset (`molab:asset/<id>`): a product a document can cite and molab's viewers can open. */
 export const isAssetRef = (ref: string): boolean => ASSET_REF.test(ref);
 
+/** The asset id an asset ref names; throws on any other ref. */
+export function assetIdOf(ref: string): string {
+  if (!isAssetRef(ref)) throw new Error(`not a molab asset ref: ${ref}. Write it as molab:asset/<asset id> (molab_read_outputs lists an attempt's assets).`);
+  return ref.slice(`${SCHEME}asset/`.length);
+}
+
 export interface ParsedRef {
   project?: string;
   experiment?: string;

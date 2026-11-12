@@ -48,6 +48,7 @@ describe("tool set", () => {
       tools: { register: (tool) => { const name = (tool as { name: string }).name; registered.push(name); return () => disposed.push(name); } },
       get: () => undefined,
       effect: (execute) => { effect = execute; },
+      provide: () => () => undefined,
     }, {});
     expect(registered).toEqual([]);
     const dispose = effect!();
@@ -68,6 +69,7 @@ describe("tool set", () => {
       } },
       get: () => undefined,
       effect: (execute) => { effect = execute; },
+      provide: () => () => undefined,
     }, {});
     expect(() => effect!()).toThrow("registry refused");
     expect([...live]).toEqual([]);
@@ -239,5 +241,60 @@ describe("knowledge documents", () => {
     const value = await h.call("molab_context", { query: "blocky", section: "hits" });
     const page = (value.meta as { page: { hits: { path: string; title: string; type: string }[] } }).page;
     expect(page.hits).toEqual([{ path: "knowledges/blocky-conducts.md", title: "Blocky conducts", type: "Hypothesis", tags: [], snippet: "Blocky sequences conduct better.", source: "workspace" }]);
+  });
+});
+
+describe("runs consume registered assets", () => {
+  let h: ResearchHarness;
+  beforeEach(async () => {
+    h = await researchHarness();
+  });
+  afterEach(() => h.close());
+
+  it("sends each cited asset's id as the run's inputs", async () => {
+    const experiment = (await h.call("molab_create_experiment", { project: "P1", name: "eq-conductivity" })).meta as { id: string };
+    const value = await h.call("molab_create_run", {
+      project: "P1",
+      experiment: experiment.id,
+      params: { state: "liquid", seed: 1 },
+      inputs: ["molab:asset/A7", "molab:asset/B2"],
+    });
+    expect((value.meta as { inputs: string[] }).inputs).toEqual(["A7", "B2"]);
+  });
+
+  it("refuses an input that is not an asset ref and creates nothing", async () => {
+    const experiment = (await h.call("molab_create_experiment", { project: "P1", name: "eq-conductivity" })).meta as { id: string };
+    const before = h.molab.requests.length;
+    await expect(h.call("molab_create_run", { project: "P1", experiment: experiment.id, params: {}, inputs: ["molab:experiment/E1"] })).rejects.toThrow(/asset ref/);
+    expect(h.molab.requests.slice(before)).toEqual([]);
+  });
+});
+
+describe("research service", () => {
+  it("lets another plugin reuse the molab client and wrap its own tools with the same approval", async () => {
+    const provided = new Map<string, unknown>();
+    const asked: string[] = [];
+    const approval = { request: async (req: { toolName: string }) => { asked.push(req.toolName); return "rejected" as const; } };
+    apply({
+      tools: { register: () => () => undefined },
+      get: (name: string) => (name === "approval" ? approval : undefined),
+      effect: () => undefined,
+      provide: (name: string, value: unknown) => { provided.set(name, value); return () => provided.delete(name); },
+    }, { molab: { url: "http://molab.test:9000" } });
+    const research = provided.get("research") as {
+      config: { molab: { url: string } };
+      molab: { url: string };
+      toTool(spec: unknown): { name: string; execute(args: unknown, exec: unknown): Promise<{ text: string }> };
+    };
+    expect(research.config.molab.url).toBe("http://molab.test:9000");
+    const tool = research.toTool({
+      name: "reproduce_probe",
+      description: "probe",
+      parameters: {},
+      execute: async (_args: unknown, exec: { approve?: (reason: string) => Promise<string> }) => ({ text: await exec.approve!("may I?") }),
+    });
+    const value = await tool.execute({}, { signal: new AbortController().signal, callId: "c1", agent: { session: { id: "S1" } } });
+    expect(value.text).toBe("rejected");
+    expect(asked).toEqual(["reproduce_probe"]);
   });
 });
