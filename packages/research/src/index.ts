@@ -6,11 +6,6 @@
  * the decision log, workers are its subagent tools, the person is asked
  * through its ask-user tool and approval seam, and waiting on compute is a
  * reminder its schedule service delivers back to the session.
- *
- * It also provides the `research` service, so a method plugin (for example
- * `@tack/reproduce`) injects it and reuses this molab client and this
- * approval wiring instead of building its own. The dependency points one way:
- * nothing here knows a method plugin.
  */
 import { parseConfig } from "./config.js";
 import { type ApprovalPort, toDshTool } from "./dsh/adapter.js";
@@ -18,7 +13,6 @@ import { MolabClient } from "./molab/client.js";
 import { molabDeleteKnowledge, molabWriteKnowledge } from "./tools/knowledge-tools.js";
 import { molabCancelExecution, molabCreateExperiment, molabCreateRun, molabDryRun, molabStartExecution } from "./tools/molab-tools.js";
 import { molabContext, molabReadOutputs } from "./tools/read-tools.js";
-import type { ResearchConfig } from "./config.js";
 import type { ResearchDeps, ToolSpec } from "./tools/types.js";
 
 export const name = "tack-research";
@@ -29,15 +23,6 @@ interface ResearchContext {
   tools: { register(definition: unknown): () => void };
   get(service: string): unknown;
   effect(execute: () => () => void, label?: string): void;
-  provide(name: string, value: unknown): () => void;
-}
-
-/** What `inject: ["research"]` hands a method plugin. */
-export interface ResearchService {
-  config: ResearchConfig;
-  molab: MolabClient;
-  /** A runtime-neutral spec as a DSH tool whose approvals go through the same seam as molab_start_execution. */
-  toTool(spec: ToolSpec<never>): unknown;
 }
 
 /** Every research tool, in the order a session meets them. */
@@ -60,15 +45,13 @@ export function apply(ctx: ResearchContext, rawConfig: unknown): void {
   const token = process.env[config.molab.tokenEnv];
   const molab = new MolabClient({ url: config.molab.url, ...(token !== undefined && token !== "" && { token }) });
   const approval = () => ctx.get("approval") as ApprovalPort | undefined;
-  const service: ResearchService = { config, molab, toTool: (spec) => toDshTool(spec, approval) };
-  ctx.provide("research", service);
   ctx.effect(() => {
     const disposers: (() => void)[] = [];
     const disposeAll = () => {
       for (const dispose of disposers.toReversed()) dispose();
     };
     try {
-      for (const spec of researchTools({ config, molab })) disposers.push(ctx.tools.register(service.toTool(spec)));
+      for (const spec of researchTools({ config, molab })) disposers.push(ctx.tools.register(toDshTool(spec, approval)));
     } catch (error) {
       // A rejected registration leaves none of the tools behind.
       disposeAll();

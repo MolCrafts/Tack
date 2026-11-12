@@ -48,7 +48,6 @@ describe("tool set", () => {
       tools: { register: (tool) => { const name = (tool as { name: string }).name; registered.push(name); return () => disposed.push(name); } },
       get: () => undefined,
       effect: (execute) => { effect = execute; },
-      provide: () => () => undefined,
     }, {});
     expect(registered).toEqual([]);
     const dispose = effect!();
@@ -69,7 +68,6 @@ describe("tool set", () => {
       } },
       get: () => undefined,
       effect: (execute) => { effect = execute; },
-      provide: () => () => undefined,
     }, {});
     expect(() => effect!()).toThrow("registry refused");
     expect([...live]).toEqual([]);
@@ -270,31 +268,3 @@ describe("runs consume registered assets", () => {
   });
 });
 
-describe("research service", () => {
-  it("lets another plugin reuse the molab client and wrap its own tools with the same approval", async () => {
-    const provided = new Map<string, unknown>();
-    const asked: string[] = [];
-    const approval = { request: async (req: { toolName: string }) => { asked.push(req.toolName); return "rejected" as const; } };
-    apply({
-      tools: { register: () => () => undefined },
-      get: (name: string) => (name === "approval" ? approval : undefined),
-      effect: () => undefined,
-      provide: (name: string, value: unknown) => { provided.set(name, value); return () => provided.delete(name); },
-    }, { molab: { url: "http://molab.test:9000" } });
-    const research = provided.get("research") as {
-      config: { molab: { url: string } };
-      molab: { url: string };
-      toTool(spec: unknown): { name: string; execute(args: unknown, exec: unknown): Promise<{ text: string }> };
-    };
-    expect(research.config.molab.url).toBe("http://molab.test:9000");
-    const tool = research.toTool({
-      name: "reproduce_probe",
-      description: "probe",
-      parameters: {},
-      execute: async (_args: unknown, exec: { approve?: (reason: string) => Promise<string> }) => ({ text: await exec.approve!("may I?") }),
-    });
-    const value = await tool.execute({}, { signal: new AbortController().signal, callId: "c1", agent: { session: { id: "S1" } } });
-    expect(value.text).toBe("rejected");
-    expect(asked).toEqual(["reproduce_probe"]);
-  });
-});
