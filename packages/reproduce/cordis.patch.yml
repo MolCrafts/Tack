@@ -92,7 +92,6 @@
 
 
                 Lessons (reviewed): none yet.
-              suffix: Your working directory is {{cwd}}.
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
@@ -208,7 +207,6 @@
 
 
                 Lessons (reviewed): none yet.
-              suffix: Your working directory is {{cwd}}.
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
@@ -291,7 +289,6 @@
 
 
                 Lessons (reviewed): none yet.
-              suffix: Your working directory is {{cwd}}.
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
@@ -374,7 +371,6 @@
 
 
                 Lessons (reviewed): none yet.
-              suffix: Your working directory is {{cwd}}.
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:

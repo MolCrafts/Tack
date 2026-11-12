@@ -88,7 +88,7 @@ describe("research persona", () => {
     const { join } = await import("node:path");
     const { REPO_ROOT } = await import("../helpers.js");
     const flat = (text: string) => text.replace(/\s+/g, " ").trim();
-    const web = readFileSync(join(REPO_ROOT, "bundles/research/cordis.patch.yml"), "utf8").match(/prefix: >-\n([\s\S]*?)\n\s+suffix:/)![1]!;
+    const web = readFileSync(join(REPO_ROOT, "bundles/research/cordis.patch.yml"), "utf8").match(/prefix: >-\n([\s\S]*?)\n\s+- id:/)![1]!;
     const run = readFileSync(join(REPO_ROOT, "bundles/research-run/cordis.patch.yml"), "utf8").match(/personaPrefix: >-\n([\s\S]*)$/)![1]!;
     expect(flat(run)).toBe(flat(web));
     const persona = flat(web);

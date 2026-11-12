@@ -71,7 +71,6 @@
                 attempt of the same run, never a new sample. Report outcomes
                 accurately, including failures and what the evidence does not
                 support.
-              suffix: Your working directory is {{cwd}}.
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
