@@ -4,7 +4,7 @@ Tack is a thin command line over
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). The agent
 loop, tools, sessions, web shell, and plugins are DeepSeek Harness's, pinned to
 one exact version. Tack adds its own home, default model, profiles, browser
-brand, and a research workbench composed through DSH's public UI slots.
+brand, and a small set of Molab research tools.
 Pieces of that runtime get replaced with Tack's own only after they have been
 used as published.
 
@@ -120,242 +120,69 @@ one of those tools.
 tack run --profile supervise "npm test fails; get it passing"
 ```
 
-In a research session (`tack web --profile research`, `tack run --profile
-research-run`) the native `subagent*` tools are refused once the session is
-bound to a delegation: workers start through `research_dispatch`, which
-compiles the brief, charges the delegation's budget, records the attempt and
-files the worker's report (see [Research](#research-molab)). A worker started
-that way is an ordinary DSH child; its settlement reaches the supervisor the
-way every subagent's does.
-
-Both providers start the child through DSH's subprocess service, which scrubs
-credential-shaped environment variables. Put a key or a gateway on the provider row, in the profile's
-`cordis.patch.yml` or a `--patch` file. A patched `config` replaces the whole
-row config:
-
-```yaml
-- id: subagent-claude-code
-  config:
-    permissionMode: bypassPermissions   # auto (Tack's default) | dontAsk | acceptEdits | plan | bypassPermissions
-    env:
-      ANTHROPIC_API_KEY: sk-...
-      ANTHROPIC_BASE_URL: https://gw/   # optional
-
-- id: subagent-codex                   # @tack/codex
-  config:
-    permissionMode: approve-for-me      # never (default) | approve-for-me | dangerously-bypass-approvals-and-sandbox
-    model: gpt-6-sol                    # optional; the account's Codex default otherwise
-    effort: high                        # optional
-    env:
-      OPENAI_API_KEY: sk-...
-```
-
-Claude's modes are `auto` (Tack's default; the provider's own is `dontAsk`), `dontAsk`, `acceptEdits`, `plan`, and
-`bypassPermissions`. Outside `bypassPermissions` the plugin denies permission
-prompts instead of asking a person. Codex's modes are `never` (the default),
-`approve-for-me`, and `dangerously-bypass-approvals-and-sandbox`; an
-unattended Codex run declines every request that needs a person and names
-what it declined in the result. Under Tack's `auto`, an unattended Claude Code
-child edits and runs tests; the classifier still refuses what it judges unsafe.
-
-Each Codex run is recorded (the task, the model, every command Codex ran and
-file it changed, and any hook Codex skipped because no person trusted it). A
-run inside a molab workspace is recorded in `<workspace>/.molab/agents/codex/`;
-`activityDir` on the row chooses another directory; any other run is left to
-Codex, which persists it in its own session store. Tack's home keeps
-configuration only.
-
-To move to a newer Codex, bump `@openai/codex` in `packages/codex/package.json`,
-then run `node packages/codex/scripts/protocol.mjs` to regenerate the protocol
-types from that release. A protocol change then shows up as a type error.
-
-`npm run test:agent` checks that the official tools are mounted.
-`npm run test:live` runs one real Claude Code handoff when both
-`DEEPSEEK_API_KEY` and `ANTHROPIC_API_KEY` are set.
+A research session (`tack web --profile research`) uses the same subagent
+tools for its workers, plus the in-process `subagent`.
 
 ## Research (Molab)
 
-`tack web --profile research` supervises research bound to one Molab scope.
+`tack web --profile research` works on research bound to one Molab scope.
 Start `molab serve` at the node the work belongs to (a project, experiment or
-run); that node is the scope, and molab refuses anything above it. For a workspace whose campaign documents sit
-at its root (like a hand-built one), serve the workspace root and bind each
-delegation to a project with `scope`.
+run); that node is the scope, and molab refuses anything above it.
 
 ```sh
 molab serve ~/lab/projects/polymer --port 8000   # the bound scope
 MOLAB_URL=http://localhost:8000 tack web --profile research
 ```
 
-The sidebar's **Research** entry opens the workbench without changing the
-current conversation. Search and filter delegations, inspect their goals,
-acceptance criteria, budgets, pending compute, worker rounds and decision
-history, and read plans, briefs and reports inline. On a narrow screen the
-list and detail switch views with **Back to delegations**. The panel follows
-DSH's light/dark palette and refreshes from Molab every 15 seconds while visible.
+New sessions start in the **Research** preset. `@tack/research` registers
+plain Molab tools and nothing else; everything around them is DeepSeek
+Harness's own:
 
-A blocked delegation shows its questions and the exact gate target. **Send
-answer** records a response without approving; **Approve** records the named
-gate and resumes supervision. **Pause supervision** leaves submitted compute
-running. Continuing, answering or approving leaves a durable wake request for
-the existing watcher to deliver to the supervising DSH session. Actions use
-DSH Connection's authenticated owner routes and the process identity
-(`TACK_BY`, otherwise the OS user). A changed delegation rejects the action
-until it is refreshed. The browser holds no authoritative research state.
-
-`@tack/ui` fills DSH's sidebar and conversation brand slots in the `web` and
-`research` profiles. `@tack/research` supplies its browser module and an optional
-Connection API in the same package as its tools; headless profiles do not
-mount a browser server. No installed DSH package is modified, and both client
-modules use the React instance already supplied by DSH's module table.
-
-New sessions start in the **Research** preset. DeepSeek supervises: it
-plans, dispatches one worker round at a time, judges the worker's report and
-decides. Workers run on DSH's subagent runtime (in-process DeepSeek, Claude
-Code, Codex through `@tack/codex`); `tack run --profile research-run` is the
-same for one step at a time. The research records go through the
-`tack-research` tools:
-
-| Step | Tool | Kept in Molab as |
+| Need | Tool | Owner |
 | --- | --- | --- |
-| Open bounded work: goal, authorized actions, budget, acceptance, stop conditions; `plan` adopts an existing Plan | `research_open` | `Delegation` |
-| Read what exists first, whoever wrote it: Plan, Roadmap stages, Todo items, Milestones, experiments and runs | `research_context` | — |
-| Replay the actual experimental sequence, including parameters, failures, resumes, decisions, approvals and historical document versions; read-only and paginated | `research_replay` | — (reads existing Molab records and git facts) |
-| Check an existing workspace's format: molab's layout and knowledge rules plus Tack's record conventions (read-only) | `research_audit` | — |
-| Testable plan with its parameters table (each value and its source; an uncertain one is asked, never guessed); one plan per delegation under a stable name, revised in place with a reason (its approval is withdrawn; molab's history keeps each version); a person approves it before any worker is dispatched | `research_plan` | `Plan` |
-| Dispatch one worker round: the task, expected products and protocol; Tack compiles the brief, starts the worker, charges a worker run and files its report. `mode: draft` (the default until the dry run is approved) writes and dry-runs the workflow without executing; `mode: run` executes the approved one | `research_dispatch` | `Note` (brief), attempt on the Delegation, `Report` (worker report); science capability gaps merged into the one `capability-gaps` Todo |
-| Preview the current source in an isolated scratch process: waves, branches and declared runs; no Delegation is needed for read-only inspection. `source: stored` explicitly inspects saved IR and historical run inventory instead | `molab_dry_run` | — |
-| Experiments, runs, attempts (idempotent request keys), cancel, outputs and logs | `molab_*` | runs and attempts |
-| Record an analysis that is not about one run as Markdown molab renders, citing at least one `molab:` ref; a structure report names its registered file (`molab:asset/<id>`), which molab opens in MolVis; no links to this machine; a new report on the same host replaces the last | `research_report` | `Report` (stable name) |
-| Draw an interactive chart (bar, line, or scatter) with MolPlot, to look at during the session (its page lives on this machine; a report never links it) | `molplot_chart` | chart page |
-| Open MolPlot's figure workbench on a Python script | `molplot_serve` | workbench page |
-| Open a structure in MolVis's 3D stage, to look at during the session (a report cites the structure's `molab:asset` ref instead) | `molvis_stage` | viewer page |
-| Draw a 2D formula on MolVis's board and link its page | `molvis_sketch` | viewer page |
-| Ask a person (questions, a gate, more budget or authority): the delegation is blocked, not stopped; continue on their answer, recording their approval of a gate with `approve` | `research_decide` (`ask_human`), `research_resume` | decisions, answers and approvals on the Delegation |
-| Remove a record written in error: the document is deleted (molab's history keeps it) | `research_retract` | — |
-| Park until compute settles; a watcher wakes the session with a brief | `research_wait`, `research_status` | waits on the Delegation |
-| Judge evidence at four levels: execution, data, analysis, conclusion; with `report`, execution and data are prefilled from the worker's report | `research_assess` | `Report` |
-| Decide and cite evidence, kept in the Delegation's decision log; `conclude` writes the finding; `capability_gap` carries the component and reproduction steps (a science tool's gap becomes an item of the `capability-gaps` Todo; a molab, DSH or Tack gap is reported back, never written to the workspace) | `research_decide` | decision log entry, `Finding` |
-| Pause supervision (compute keeps running) | `research_pause` | Delegation state |
+| Read what exists (projects, experiments, workflows, recent/failed/running runs, assets, knowledge), each entry with the `molab:` ref the tools take; `query` searches knowledge; `section`, `offset`, `limit` page it | `molab_context` | `@tack/research` |
+| Preview a workflow without executing: waves, branches, declared runs (`source: stored` inspects saved IR and historical inventory) | `molab_dry_run` | `@tack/research` |
+| Create an experiment or a run | `molab_create_experiment`, `molab_create_run` | `@tack/research` |
+| Start one attempt of a run, after the person approves it | `molab_start_execution` | `@tack/research` over DSH approval |
+| Cancel an attempt | `molab_cancel_execution` | `@tack/research` |
+| Read an attempt's results, assets, evidence and logs, paged | `molab_read_outputs` | `@tack/research` |
+| Write a `Note`, `Literature`, `Report`, `Finding`, `Plan`, `Observation` or `Hypothesis` with its sources; the same name under the same host rewrites it in place | `molab_write_knowledge` | `@tack/research` |
+| Delete a document written in error (molab's history keeps it) | `molab_delete_knowledge` | `@tack/research` |
+| Ask the person a question | `ask_user_question` | DSH |
+| Hand work to a worker | `subagent`, `subagent_claude_code`, `subagent_codex` | DSH, `@tack/codex` |
+| Come back when compute should be done | `schedule_create` | DSH |
+| Look at a chart or a structure during the session | `molplot_chart`, `molplot_serve`, `molvis_stage`, `molvis_sketch` | `@tack/molplot`, `@tack/molvis` |
 
-**The brief** a worker receives is compiled once from the delegation and
-kept as a `Note` (record kind `brief`, with the sha256 of its body): goal,
-scope, acceptance, stop conditions and budget left; the round's task,
-expected products and protocol (reproduce an execution exactly, or an
-independent realization; seed, stereochemistry, charges); the current plan;
-what people answered, verbatim; the last decision; the last three attempts
-with their reports; the workflow path; known capability gaps; the workspace
-rules (scratch only under an experiment's `scratch/`, `molab run --rerun
---fresh` to recompute, never hand-edit `index.md`, `executions/` or
-`.molab/`; in-process workers use the `molab_*` tools, not the CLI; a probe
-cap; report, don't guess); and the report contract.
+**Approval before compute.** `molab_start_execution` first dry-runs the
+experiment's current workflow source, then asks the person through DSH's
+approval seam (`ctx.approval`, `@deepseek-ai/dsh-user-approval`) with a
+request that names the run, the mode, the target and the dry run's waves and
+runs. Only a one-shot `allowed-once` starts the attempt; a rejection, a
+withdrawn request, a missing approval service or an absent answerer starts
+nothing. Every request and outcome is audited in the session log. In the web
+profile the browser answers; a headless `tack run` has no answerer, so it
+fails closed there, as it does under the `never` approval policy.
 
-**The report** every worker returns is one JSON object: `outcome` (done |
-partial | blocked | failed), `summary`, `checks` (one per expected product
-and acceptance criterion: verdict pass | fail | unknown, value, note),
-`products` (path, kind, description), `files_changed`, `workflow`,
-`protocol_deviations` (item, expected, actual), `capability_gaps`
-(component molpy | atomiverse | molvis | molab | dsh | tack, title, repro,
-version, fix), `open_questions`, `next`, `tokens`. A provider that captures
-structured output (in-process, `@tack/codex`) fills it through
-`structured_output`; Claude Code ends its reply with one fenced ```` ```json ````
-block. Tack files it as a `Report` (record kind `worker_report`, authored by
-the worker, linked to the attempt) and writes each capability gap as an
-`Observation`; a missing or invalid report leaves a `check` on the attempt
-instead. The supervisor assesses from the report (`research_assess` with
-`report`) and reads the outputs only when the report is missing, invalid or
-contradicts the acceptance criteria. Worker sessions keep to a worker's
-tools: `research_context`, `research_audit`, `molab_create_experiment`,
-`molab_create_run`, `molab_start_execution`, `molab_read_outputs`; the
-recording and deciding tools are refused there.
+**Waiting on compute.** The Research preset mounts DSH's schedule tools: after
+starting an attempt the agent schedules its own check, and the web host's
+schedule service delivers it back to the same session, across restarts. Tack
+polls nothing and writes no wait record.
 
-**A report that does not come** is asked for once: when an in-process worker
-(spawn, fork) ends with an error, no report, or one that does not parse, Tack
-sends it one message asking for the report as a fenced ```` ```json ```` block
-and reopens the attempt (its `check` says "report re-requested once"); the
-reply's end files the report as usual. A second end without a valid report
-settles the attempt as unreported and no third request is made; Claude Code
-and Codex take no further messages, so their attempt settles at once.
+**Records.** A knowledge document's sources are `molab:` refs (an execution is
+cited as its run), URLs or DOIs, and workspace files; other knowledge document
+paths become `cites` edges. A `Report` or `Finding` cites at least one
+`molab:` ref, its body is Markdown molab renders (no HTML page), and nothing
+links a page served from this machine: the MolPlot and MolVis pages are for
+looking during the session.
 
-**A worker is confined to the served root.** In a worker session bound to a
-delegation, the file tools (`read`, `read_image`, `write`, `edit`, `glob`,
-`grep`, `working_directory`) take paths inside the root, the temp directories
-or `workers.allowedPaths`, and the arguments of a `bash` command stay there or
-under a system prefix (`/usr`, `/opt`, `/etc`, …) while its executable may
-live anywhere (a venv's python); a call that reaches another workspace is
-refused with `TACK_WORKER_CONFINED` and told to work inside the root. Results
-from other workspaces go into the brief as `attachments`; `workers.confine:
-false` turns the confinement off, and the supervisor is never confined.
+`tack run --profile research-run` mounts the same tools and persona on the
+headless stack for reading and recording; it cannot start compute (no
+answerer) or schedule a check (no schedule service).
 
-Budget and authority are a person's to widen:
-`tack research amend <delegation> --budget worker_runs=10 --reason "..."`
-records who, when and why on the delegation.
-
-**Research replay.** In the Research panel, choose **研究回放** to step forward
-or backward, play/pause, scrub the timeline, filter record types and inspect
-the parameters and evidence for each step. **查看当时的文档** reads the version
-recorded at that step, even if the plan was later rewritten or deleted.
-This view uses the real served workspace, including when opened from the
-design examples; it never re-executes compute or records an approval.
-
-The same read-model is available without booting a model:
-
-```sh
-tack research replay --molab-url http://localhost:8000
-tack research replay --experiment EXPERIMENT_ID --kind execution --limit 100 --json
-```
-
-Set `MOLAB_URL` to change the default server. Follow a page's `nextOffset`
-with `--offset` and its `asOf` with `--as-of`. The `research_replay` tool also
-accepts a recorded event's `document` and `commit` to read that exact version.
-Execution ids are qualified by run; simultaneous attempts remain overlapping
-in time. Molab's saved attempt records fill missing git lifecycle events.
-When document history is unavailable, replay says so instead of inventing
-past decisions. Product entries describe their current registered version.
-
-**Human gates.** The supervisor does not guess: four checkpoints need a
-person before the work moves on. The tools enforce them, and the supervisor
-never records an approval the person did not give.
-
-| Gate | Where | What the person does |
-| --- | --- | --- |
-| `parameters` | before `research_plan` | Answers the simulation parameters the goal, the workspace and the literature do not settle (system size and composition, force field and parameter set, charge model, box/PBC and density, ensemble/thermostat/barostat, timestep and duration, seeds, acceptance tolerances); a plan with an `uncertain` parameter is refused |
-| `plan` | after `research_plan` | Approves the Plan (`批准 <plan path>` / `approve <plan path>`) before any worker is dispatched; a revised plan needs approval again |
-| `dry_run` | after the draft round | Approves the workflow's dry run (`molab workflow dry-run <script.py> --json` for a CLI worker, `molab_dry_run` in-process: waves, branches, runs) before `research_dispatch mode: run`, `molab_start_execution` or a worker's `molab run`; until then a worker session's `molab run` (with or without `--dry-run`, which still creates runs) and `molab_start_execution` are refused with `TACK_GATE_DRYRUN`. An approval names the experiment's path (what the dry run prints) or the workflow path under it, and covers both |
-| `results` | before `conclude` | Approves the latest assessment Report |
-
-A gate question is `research_decide ask_human` with `gate: {gate, target}`:
-the delegation is blocked, its questions carry a `[gate:<gate> target:<path>]`
-marker (molab's Delegation record has no field for it), and the run ends.
-When a delegation the run worked on is blocked, `tack run` prints after its
-answer a line `TACK-GATE` followed by one JSON object `{delegation, state,
-gate, target, questions}` (one per blocked delegation; in `--json` mode too,
-after the event stream), so the agent that invoked it reads the questions and
-writes the answer, or `批准 <path>`, in the next prompt. The supervisor
-records that answer with `research_resume`, passing `approve: {gate, target}`
-only when the words clearly approve that target. Who answered is never the
-model's choice: a headless run records `TACK_BY`, else the OS user. Approvals
-live on the Delegation record (`approvals: [{gate, target, by, at, note}]`),
-where a web client will answer through the same records; there is no CLI for
-approvals. `gates.parameters`, `gates.plan`, `gates.dryRun` and
-`gates.results` in the `tack-research` row config switch each gate off
-(default on).
-
-`research_context` accepts `section`, `offset` and `limit` for paged reads
-(for example, `section: recentRuns`). `molab_read_outputs` defaults to results
-and paged assets/evidence for exactly the requested run and attempt; select
-`section: assets`, `results`, `evidence` or `unregistered`, and read logs
-separately with `log` and its byte offset. Truncation is marked as valid JSON,
-never a silently cut document. Viewer tools mount without starting a server;
-their Python/CLI dependencies are resolved on first use. `doctor` also checks
-that the research viewer tools actually register. `MOLPLOT_PYTHON` selects an
-interpreter explicitly; otherwise the MolPlot or Molab CLI shebang supplies it.
-
-Tack keeps no authoritative state. Every record is a Molab knowledge document,
-and every change is a commit in the workspace history. After a restart, the
-watcher reconciles waits against Molab: it finds a lost submission by its
-request key instead of resubmitting it. `MOLAB_TOKEN` carries a bearer token
-when molab runs with `--auth`. The `tack-research` row config sets `molab.url`,
-`pollSeconds`, `workers.confine`, `workers.allowedPaths` and the `gates`.
+`MOLAB_TOKEN` carries a bearer token when molab runs with `--auth`. The
+`tack-research` row config sets `molab.url`, `molab.tokenEnv` and
+`createdBy` (the author recorded on molab writes). `MOLPLOT_PYTHON` selects
+the MolPlot interpreter; `doctor` checks that the viewer tools register.
 
 ## Runtime updates
 
