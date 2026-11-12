@@ -1,0 +1,20 @@
+{
+  "name": "@tack/reproduce",
+  "version": "0.1.0",
+  "description": "Tack method: reproduce a paper in one molab project; an orchestrator with Intake, Critic and Judge subagents, where only the Judge reads the acceptance criteria",
+  "license": "MIT",
+  "files": [
+    "cordis.patch.yml"
+  ],
+  "keywords": [
+    "tack-plugin"
+  ],
+  "tack": {
+    "compat": ">=0.2.0 <1.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

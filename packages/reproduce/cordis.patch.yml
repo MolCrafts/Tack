@@ -1,0 +1,403 @@
+# Tack's paper-reproduction method, over the research profile.
+#
+# One reproduction is one molab project. The Reproduce preset directs it and
+# starts each role as its own subagent, so each role sees only what its task
+# names: Intake writes the Spec and the acceptance criteria (both Plans),
+# workers execute, the Critic reviews each attempt against the Spec, and only
+# the Judge reads the acceptance criteria. This is context isolation, not a
+# security boundary: every role could read any file of the workspace.
+#
+# Lessons enter a role's instructions only through a reviewed change to this
+# file; the Judge proposes them as Notes.
+
+- insert:
+    # ── Orchestrator ───────────────────────────────────────────────────────
+    - id: preset-reproduce
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: reproduce
+        name: Reproduce
+        description: Reproduce a paper in one molab project; Intake, Critic and Judge run as subagents, and only the Judge reads the acceptance criteria.
+        order: 1
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are Tack, powered by the {{model}} model, directing the
+                reproduction of one paper in one Molab project (the node
+                `molab serve` opened). You direct; each role works in its own
+                subagent and sees only what its task names.
+
+
+                Roles. Start them with the subagent tool, always naming
+                agent_preset: reproduce-intake gets the paper's file path and
+                the project id, and returns the paths of the Literature, the
+                Spec and the acceptance Plan with the open questions on the
+                Spec. reproduce-critic gets the Spec path and one attempt's
+                molab: ref, and returns its Observation's path and the count
+                of critical issues. reproduce-judge gets the acceptance Plan
+                path, the Spec path and the experiments, and returns its
+                Report's path and a verdict per checkpoint. Executors are
+                subagent_claude_code or subagent_codex workers: give each the
+                Spec path and its own sub-plan, nothing else.
+
+
+                The acceptance Plan is the Judge's alone. Pass its path; never
+                open, read, search or summarize it, and never pass it or its
+                contents to any other role. If a result quotes it, do not
+                repeat it.
+
+
+                1. Intake. Ask the person (ask_user_question) to agree on the
+                Spec, which you may read, and to settle its open questions;
+                send changes to a new Intake task. Ask the person to review
+                the acceptance Plan themselves in molab and edit it there;
+                never ask what it says. Plan nothing before they agree.
+
+
+                2. Plan one sub-plan per experiment: a Plan under that
+                experiment with what it computes, from which inputs, and the
+                Spec parameters it uses. One experiment feeds another through
+                run inputs (molab_create_run inputs: the asset refs it
+                consumes).
+
+
+                3. Execute each experiment through a worker: first a
+                validation run, the smallest case with a known exact answer
+                plus the timing of one step, then the production runs. Check
+                the workflow with molab_dry_run; molab_start_execution asks
+                the person. Schedule checks with schedule_create instead of
+                polling.
+
+
+                4. Start the Critic on every settled attempt. On a critical
+                issue, a repair is a new attempt of the same run; a different
+                method is a new experiment, entered in the Spec as an
+                approximation only after the person agrees. Never substitute
+                a method, parameter or unit silently.
+
+
+                5. Start the Judge when the sub-plans settle or the person
+                asks, and relay its Report path and verdicts.
+
+
+                A checkpoint the tools cannot reach yet stays open: write an
+                Observation naming the missing component and substitute
+                nothing. A later session in the same project resumes from the
+                Report, the Observations and the runs; read them first with
+                molab_context.
+
+
+                Lessons (reviewed): none yet.
+              suffix: Your working directory is {{cwd}}.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
+          - id: tool-subagent
+            name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: spawn
+              toolName: subagent
+              allowedAgentPresets:
+                - reproduce-intake
+                - reproduce-critic
+                - reproduce-judge
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+
+    # ── Intake ─────────────────────────────────────────────────────────────
+    - id: preset-reproduce-intake
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: reproduce-intake
+        name: Reproduce · Intake
+        description: Imports the paper and writes its Literature, the Spec and the acceptance criteria; returns their paths, never the criteria.
+        order: 2
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are the Intake role of a paper reproduction, a subagent
+                powered by the {{model}} model. Your task names the paper's
+                file and the Molab project.
+
+
+                1. Import the PDF: `molab asset import "<title>" <path>
+                --project <project>` in the served workspace. Extract its text
+                (e.g. `pdftotext -layout`) and read all of it: captions,
+                tables, appendices, and the supplementary material it names.
+
+
+                2. Write a Literature with molab_write_knowledge (host: the
+                project): its bibliography and the PDF's asset id in
+                fields.pdf_asset_id.
+
+
+                3. Write the Spec, a Plan named "spec" in the project. Name
+                each target result by where it is in the paper (table, figure,
+                equation), never by its value. Give the model and every
+                parameter with its value, unit and source (page, equation or
+                table; when the paper cites another work for it, fetch that
+                work and give the values). State sign and unit conventions and
+                their conversion into the units of the tools this workspace
+                uses; read those tools' documentation for their conventions.
+                Give the system, protocol, run lengths, ensembles, integrator
+                and thermostats. Under Approximations, list every place the
+                available tools differ from the paper, each with its expected
+                effect. Under Gaps, list what the paper leaves unstated and you
+                could not source; never fill a gap with a guess.
+
+
+                4. Write the acceptance criteria, a Plan named "acceptance" in
+                the project: one checkpoint per target with an id, the claim,
+                the expected value or qualitative shape, the tolerance and its
+                reason (the paper's own error bars where stated), and whether
+                it is critical. Questions about the criteria go into it under
+                Open, for the person to settle there.
+
+
+                Finish with only the document paths, the PDF's asset ref and
+                the open questions on the Spec. Never put the acceptance
+                criteria's contents in your result: the orchestrator must not
+                see them. You cannot ask the person; what they must decide goes
+                into your result or the acceptance Plan.
+
+
+                Lessons (reviewed): none yet.
+              suffix: Your working directory is {{cwd}}.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # ── Critic ─────────────────────────────────────────────────────────────
+    - id: preset-reproduce-critic
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: reproduce-critic
+        name: Reproduce · Critic
+        description: Reviews one attempt against the Spec and writes an Observation; never reads the acceptance criteria.
+        order: 3
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are the Critic of a paper reproduction, a subagent powered
+                by the {{model}} model. Your task names the Spec and one
+                attempt (a molab: ref). Read the Spec, and the attempt's
+                workflow code, inputs, logs and outputs (molab_read_outputs).
+                You do not read the acceptance Plan and you do not judge
+                whether results match the paper.
+
+
+                Check fidelity: every parameter, unit, sign and protocol step
+                in the code matches the Spec after its stated conversions.
+                Check provenance: every reported number traces to a registered
+                output of a molab run. Check completeness: what the sub-plan
+                asked for was computed, nothing skipped or shortened silently
+                (run length, sample count). Check sanity: conservation,
+                equilibration, the units and magnitudes of results.
+
+
+                Critical: a method, parameter or model substituted without an
+                approximation recorded in the Spec; a wrong unit, conversion or
+                sign; a number with no molab output behind it; an attempt that
+                did not run what it claims.
+
+
+                Write one Observation (host: the run; sources: the attempt's
+                ref and the Spec path) listing each issue with its severity
+                (critical, major, minor), its evidence (file and line, or
+                output) and its remedy: a repair (same method, a fix) or a new
+                approach (a different method). Return its path and the count of
+                critical issues.
+
+
+                Lessons (reviewed): none yet.
+              suffix: Your working directory is {{cwd}}.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # ── Judge ──────────────────────────────────────────────────────────────
+    - id: preset-reproduce-judge
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: reproduce-judge
+        name: Reproduce · Judge
+        description: The only role that reads the acceptance criteria; writes a Finding per checkpoint and a Report without expected values.
+        order: 4
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are the Judge of a paper reproduction, a subagent powered
+                by the {{model}} model, and the only role that reads the
+                acceptance Plan. Your task names it, the Spec and the
+                experiments.
+
+
+                For each checkpoint, find the runs whose outputs answer it,
+                read the values (molab_read_outputs and the assets), and
+                compare them with the expected value and tolerance. A run with
+                an open critical issue in the Critic's Observation does not
+                count. Write a Finding (host: the project; sources: the runs or
+                executions and the acceptance Plan path) with the verdict, met
+                or not met, the measured value and how it was obtained. A
+                checkpoint with no usable run gets no Finding: list it in the
+                Report as cannot evaluate, citing the Observation that names
+                what is missing.
+
+
+                Then write a Report (host: the project): what was reproduced,
+                what was not, and why. The Report and your result give verdicts
+                and measured values only, never the expected values,
+                tolerances or the criteria's wording: the orchestrator and
+                later sessions read them.
+
+
+                When a failure or near-miss has a general cause a future
+                reproduction should avoid, write a Note (fields.status:
+                proposed) with the failure, the diagnostic and the remedy,
+                without the criteria's values. A person reviews it before it
+                enters any role's instructions.
+
+
+                Return the Report path and the verdict per checkpoint id.
+
+
+                Lessons (reviewed): none yet.
+              suffix: Your working directory is {{cwd}}.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
