@@ -42,7 +42,7 @@ export const WorkspaceContext = z.looseObject({
   recentRuns: z.array(z.looseObject({ runId: z.string(), experimentId: z.string() })).default([]),
   failedRuns: z.array(z.looseObject({ runId: z.string(), experimentId: z.string() })).default([]),
   runningRuns: z.array(z.looseObject({ runId: z.string(), experimentId: z.string() })).default([]),
-  knowledge: z.array(z.looseObject({ path: z.string(), type: z.string(), title: z.string() })).default([]),
+  knowledge: z.array(z.looseObject({ path: z.string(), cls: z.string(), title: z.string() })).default([]),
 });
 export type WorkspaceContext = z.infer<typeof WorkspaceContext>;
 
@@ -61,11 +61,11 @@ export type ExecutionOutputs = z.infer<typeof ExecutionOutputs>;
 export const LogChunk = z.looseObject({ text: z.string(), nextOffset: z.number(), eof: z.boolean() });
 export type LogChunk = z.infer<typeof LogChunk>;
 
-export const NoteSummary = z.looseObject({ name: z.string(), relPath: z.string(), cls: z.string().default("Note") });
+export const NoteSummary = z.looseObject({ name: z.string(), relPath: z.string(), cls: z.string() });
 export type NoteSummary = z.infer<typeof NoteSummary>;
 
 export const SearchHits = z.looseObject({
-  hits: z.array(z.looseObject({ path: z.string(), title: z.string(), type: z.string() })),
+  hits: z.array(z.looseObject({ path: z.string(), title: z.string(), cls: z.string() })),
   truncated: z.boolean(),
 });
 export type SearchHits = z.infer<typeof SearchHits>;
@@ -86,12 +86,6 @@ export const DryRun = z.looseObject({
 });
 export type DryRun = z.infer<typeof DryRun>;
 
-/** A source a sourced knowledge document derives from. */
-export interface DocSource {
-  kind: "run" | "experiment" | "asset" | "project" | "reference" | "file";
-  ref: string;
-}
-
 /** The knowledge classes molab writes. */
-export const KNOWLEDGE_CLASSES = ["Note", "Literature", "Report", "Finding", "Plan", "Observation", "Hypothesis"] as const;
+export const KNOWLEDGE_CLASSES = ["Note", "Literature", "Report", "Finding", "Plan", "Roadmap", "Todo", "Milestone", "Observation", "Hypothesis", "Decision"] as const;
 export type KnowledgeClass = (typeof KNOWLEDGE_CLASSES)[number];

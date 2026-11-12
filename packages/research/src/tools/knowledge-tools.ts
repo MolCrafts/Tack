@@ -4,17 +4,9 @@
  * rests on, or delete one written in error. Molab renders the Markdown body,
  * turns its `molab:` refs into links, and keeps every version in its history.
  */
-import type { LiteratureMeta } from "../molab/client.js";
 import { KNOWLEDGE_CLASSES, type KnowledgeClass } from "../molab/schemas.js";
 import { citations } from "./records.js";
 import type { ResearchDeps, ToolSpec } from "./types.js";
-
-/** Classes whose trail must lead back to registered results. */
-const EVIDENCED: ReadonlySet<KnowledgeClass> = new Set(["Report", "Finding"]);
-/** A link that only works on the machine that wrote it. */
-const LOCAL_URL = /\b(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?\b/i;
-/** Markup that makes a body a page rather than Markdown. */
-const HTML_PAGE = /<\s*(?:!doctype|html|head|body|iframe|script|style)\b/i;
 
 interface WriteArgs {
   cls: KnowledgeClass;
@@ -22,22 +14,7 @@ interface WriteArgs {
   body: string;
   host?: string;
   sources?: string[];
-  literature?: LiteratureMeta;
-}
-
-/** Why a document cannot be written as given; undefined when it can. */
-export function writeRefusal(args: WriteArgs): string | undefined {
-  if (args.name.trim() === "" || args.body.trim() === "") return "a document has a name and a body";
-  const sources = args.sources ?? [];
-  if (EVIDENCED.has(args.cls) && !sources.some((item) => item.startsWith("molab:"))) {
-    return `a ${args.cls} cites at least one molab: ref in sources (the asset, run or execution it rests on), so its trail leads back to registered results`;
-  }
-  if (args.literature !== undefined && args.cls !== "Literature") return "literature metadata goes with cls Literature only";
-  const texts = [args.body, ...sources];
-  const local = texts.find((text) => LOCAL_URL.test(text));
-  if (local !== undefined) return `a document holds no link to this machine (localhost / 127.0.0.1): it is dead for every other reader. Cite the molab: ref of what it showed instead (found in: ${local.slice(0, 120)})`;
-  if (HTML_PAGE.test(args.body)) return "the body is Markdown that molab renders, not an HTML page: no <html>, <iframe> or <script>";
-  return undefined;
+  fields?: Record<string, unknown>;
 }
 
 export function molabWriteKnowledge(deps: ResearchDeps): ToolSpec<WriteArgs> {
@@ -46,7 +23,8 @@ export function molabWriteKnowledge(deps: ResearchDeps): ToolSpec<WriteArgs> {
     description: [
       `Write a molab knowledge document: ${KNOWLEDGE_CLASSES.join(", ")}. Writing the same name under the same host rewrites that document in place (molab keeps the history), so keep names stable: no date or version in them.`,
       "The body is Markdown that molab renders; molab: refs in it become links (an asset ref opens the asset, a structure in MolVis). Never link a page served from this machine and never write HTML.",
-      "List what it rests on in sources: molab: refs (asset, run, execution, experiment), URLs or DOIs, workspace files, and other knowledge document paths. A Report or Finding cites at least one molab: ref.",
+      "List what it rests on in sources: molab: refs (asset, run, execution, experiment), URLs or DOIs, workspace files, and other knowledge document paths. A Report or Finding cites at least one asset, run or execution.",
+      "molab refuses a document that breaks one of its rules and says which; fix the write from that message.",
     ].join(" "),
     parameters: {
       cls: { type: "string", required: true, enum: [...KNOWLEDGE_CLASSES] },
@@ -54,24 +32,15 @@ export function molabWriteKnowledge(deps: ResearchDeps): ToolSpec<WriteArgs> {
       body: { type: "string", required: true, description: "The narrative, in Markdown." },
       host: { type: "string", description: "Workspace-relative directory (a project, experiment or run path) to file it under; default the served root." },
       sources: { type: "array", items: { type: "string" }, description: "molab: refs, URLs or DOIs, workspace files and knowledge document paths it rests on." },
-      literature: {
+      fields: {
         type: "object",
-        description: "With cls Literature: the reference's bibliographic fields.",
-        additionalProperties: false,
-        properties: {
-          title: { type: "string" },
-          authors: { type: "array", items: { type: "string" } },
-          year: { type: "integer" },
-          doi: { type: "string" },
-          venue: { type: "string" },
-          url: { type: "string" },
-        },
+        additionalProperties: true,
+        description:
+          "The structured fields its class declares, and no others: Literature title, authors, year, doi, venue, url, pdf_asset_id; Hypothesis verdict (open, supported, refuted, unsettled); Decision status (open while it waits for a person, made); Todo items [{id, title, status: open|done|blocked, stage?}]; Roadmap stages [{id, title, experiment?, depends_on?}]; Milestone criterion, status (open, met, missed), stage?; Note status.",
       },
     },
     async execute(args, exec) {
-      const refusal = writeRefusal(args);
-      if (refusal !== undefined) throw new Error(refusal);
-      const { sources, documents } = citations(args.sources ?? []);
+      const { sources, cites } = citations(args.sources ?? []);
       const written = await deps.molab.createDoc(
         {
           name: args.name.trim(),
@@ -79,12 +48,12 @@ export function molabWriteKnowledge(deps: ResearchDeps): ToolSpec<WriteArgs> {
           ...(args.host !== undefined && args.host.trim() !== "" && { hostPath: args.host.trim() }),
           body: args.body,
           sources,
+          cites,
+          ...(args.fields !== undefined && { fields: args.fields }),
           createdBy: deps.config.createdBy,
-          ...args.literature,
         },
         exec.signal,
       );
-      for (const target of documents) await deps.molab.cite(written.relPath, target, exec.signal);
       return { text: `Wrote ${written.cls} ${written.relPath}.`, meta: written };
     },
   };

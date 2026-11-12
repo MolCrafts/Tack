@@ -86,18 +86,12 @@ describe("tool set", () => {
     }
   });
 
-  it("parses molab refs and sorts citations into sources and documents", () => {
+  it("parses molab refs and sorts citations into sources and cited documents", () => {
     expect(parseRef(executionRef("E1", "R1", "e02"))).toEqual({ experiment: "E1", run: "R1", execution: "e02" });
     expect(() => parseRef("projects/p1")).toThrow(/not a molab/);
-    expect(citations([executionRef("E1", "R1", "e02"), "molab:asset/A7", "https://doi.org/10.1/x", "10.1021/abc", "experiments/screen/scratch/out.csv", "experiments/screen/knowledges/plan.md", " "])).toEqual({
-      sources: [
-        { kind: "run", ref: runRef("E1", "R1") },
-        { kind: "asset", ref: "molab:asset/A7" },
-        { kind: "reference", ref: "https://doi.org/10.1/x" },
-        { kind: "reference", ref: "10.1021/abc" },
-        { kind: "file", ref: "experiments/screen/scratch/out.csv" },
-      ],
-      documents: ["experiments/screen/knowledges/plan.md"],
+    expect(citations([executionRef("E1", "R1", "e02"), "molab:asset/A7", "https://doi.org/10.1/x", "experiments/screen/scratch/out.csv", "experiments/screen/knowledges/plan.md", " ", "molab:asset/A7"])).toEqual({
+      sources: [executionRef("E1", "R1", "e02"), "molab:asset/A7", "https://doi.org/10.1/x", "experiments/screen/scratch/out.csv"],
+      cites: [{ target: "experiments/screen/knowledges/plan.md" }],
     });
   });
 });
@@ -171,7 +165,7 @@ describe("knowledge documents", () => {
   });
   afterEach(() => h.close());
 
-  it("writes a Report with its sources and links the documents it cites", async () => {
+  it("writes a Report with its sources and the documents it cites in one request", async () => {
     const { experiment, run } = h.molab.seedRun();
     await h.call("molab_write_knowledge", { cls: "Plan", name: "Sequence plan", body: "Compare ABAB with AABB.", host: "experiments/screen", sources: [`molab:experiment/${experiment}`] });
     h.molab.plantFile("experiments/screen/scratch/sigma.csv");
@@ -187,11 +181,7 @@ describe("knowledge documents", () => {
     const doc = h.molab.docs.get(path)!;
     expect(doc.cls).toBe("Report");
     expect(doc.createdBy).toBe("tack");
-    expect(doc.sources).toEqual([
-      { kind: "run", ref: runRef(experiment, run) },
-      { kind: "asset", ref: "molab:asset/A1" },
-      { kind: "file", ref: "experiments/screen/scratch/sigma.csv" },
-    ]);
+    expect(doc.sources).toEqual([executionRef(experiment, run, "e01"), "molab:asset/A1", "experiments/screen/scratch/sigma.csv"]);
     expect(doc.edges).toEqual([{ target: "experiments/screen/knowledges/sequence-plan.md", role: "cites" }]);
   });
 
@@ -208,22 +198,17 @@ describe("knowledge documents", () => {
       name: "Ion transport in block copolymers",
       body: "Blocky sequences raise conductivity.",
       sources: ["https://doi.org/10.1021/ma000000"],
-      literature: { title: "Ion transport in block copolymers", authors: ["A. Author"], year: 2021, doi: "10.1021/ma000000" },
+      fields: { title: "Ion transport in block copolymers", authors: ["A. Author"], year: 2021, doi: "10.1021/ma000000", pdf_asset_id: "A9" },
     });
     const doc = h.molab.docs.get("knowledges/ion-transport-in-block-copolymers.md")!;
-    expect(doc.extra).toMatchObject({ title: "Ion transport in block copolymers", authors: ["A. Author"], year: 2021, doi: "10.1021/ma000000" });
-    expect(doc.sources).toEqual([{ kind: "reference", ref: "https://doi.org/10.1021/ma000000" }]);
+    expect(doc.fields).toEqual({ title: "Ion transport in block copolymers", authors: ["A. Author"], year: 2021, doi: "10.1021/ma000000", pdf_asset_id: "A9" });
+    expect(doc.sources).toEqual(["https://doi.org/10.1021/ma000000"]);
   });
 
-  it("refuses a Finding without a molab ref, a link to this machine, HTML, and stray literature fields", async () => {
-    const refused = [
-      [{ cls: "Finding", name: "AABB wins", body: "AABB conducts better.", sources: ["experiments/screen/scratch/sigma.csv"] }, /at least one molab: ref/],
-      [{ cls: "Report", name: "Chart", body: "See http://localhost:5173/chart", sources: ["molab:asset/A1"] }, /no link to this machine/],
-      [{ cls: "Note", name: "Page", body: "<html><body>x</body></html>" }, /not an HTML page/],
-      [{ cls: "Note", name: "Paper", body: "x", literature: { title: "x" } }, /cls Literature only/],
-      [{ cls: "Delegation", name: "Old", body: "x" }, /"cls" must be one of/],
-    ] as const;
-    for (const [args, message] of refused) await expect(h.call("molab_write_knowledge", args as never)).rejects.toThrow(message);
+  it("hands molab's refusal back to the agent and writes nothing", async () => {
+    await expect(h.call("molab_write_knowledge", { cls: "Finding", name: "AABB wins", body: "AABB conducts better.", sources: ["https://doi.org/10.1/x"] })).rejects.toThrow(/knowledge\.unanchored/);
+    await expect(h.call("molab_write_knowledge", { cls: "Note", name: "Dangling", body: "x", sources: ["knowledges/missing.md"] })).rejects.toThrow(/names nothing/);
+    await expect(h.call("molab_write_knowledge", { cls: "Delegation", name: "Old", body: "x" } as never)).rejects.toThrow(/"cls" must be one of/);
     expect(h.molab.docs.size).toBe(0);
   });
 
@@ -237,8 +222,8 @@ describe("knowledge documents", () => {
   it("finds written knowledge through the context's search hits", async () => {
     await h.call("molab_write_knowledge", { cls: "Hypothesis", name: "Blocky conducts", body: "Blocky sequences conduct better." });
     const value = await h.call("molab_context", { query: "blocky", section: "hits" });
-    const page = (value.meta as { page: { hits: { path: string; title: string; type: string }[] } }).page;
-    expect(page.hits).toEqual([{ path: "knowledges/blocky-conducts.md", title: "Blocky conducts", type: "Hypothesis", tags: [], snippet: "Blocky sequences conduct better.", source: "workspace" }]);
+    const page = (value.meta as { page: { hits: { path: string; title: string; cls: string }[] } }).page;
+    expect(page.hits).toEqual([{ path: "knowledges/blocky-conducts.md", title: "Blocky conducts", cls: "Hypothesis", tags: [], snippet: "Blocky sequences conduct better.", source: "workspace" }]);
   });
 });
 

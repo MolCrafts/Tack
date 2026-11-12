@@ -1,41 +1,23 @@
 /**
- * What a cited item becomes when a knowledge document is written: a molab
- * ref, a URL or DOI, or a workspace file is a create-time source; another
- * knowledge document is a typed edge added once the document exists.
+ * What a cited item becomes when a knowledge document is written: another
+ * knowledge document is a typed edge (`cites`); a molab ref, a URL or DOI, or
+ * a workspace file is a source. molab classifies and checks both.
  */
-import { isAssetRef, parseRef, runRef } from "../molab/refs.js";
-import type { DocSource } from "../molab/schemas.js";
-
-/** A molab ref as the source kind molab's create route takes; an execution is cited as its run. */
-export function sourceOf(ref: string): DocSource {
-  if (isAssetRef(ref)) return { kind: "asset", ref };
-  const parsed = parseRef(ref);
-  if (parsed.experiment !== undefined && parsed.run !== undefined) return { kind: "run", ref: runRef(parsed.experiment, parsed.run) };
-  if (parsed.experiment !== undefined) return { kind: "experiment", ref };
-  return { kind: "project", ref };
-}
+import type { DocCite } from "../molab/client.js";
 
 /** A knowledge document path (`<host>/knowledges/<slug>.md`), as opposed to any other workspace file. */
 export function isKnowledgePath(item: string): boolean {
   return /(^|\/)knowledges\/[^/]+\.(md|html)$/.test(item);
 }
 
-/** An http(s) URL or a DOI: molab stores it as a reference source. */
-const REFERENCE = /^(https?:\/\/|doi:|10\.\d{4,}\/)/i;
-
-/** Sort citations into create-time sources and documents to link afterwards. */
-export function citations(items: readonly string[]): { sources: DocSource[]; documents: string[] } {
-  const sources = new Map<string, DocSource>();
+/** Sort citations into sources and the documents the new one cites, dropping blanks and repeats. */
+export function citations(items: readonly string[]): { sources: string[]; cites: DocCite[] } {
+  const sources = new Set<string>();
   const documents = new Set<string>();
   for (const raw of items) {
     const item = raw.trim();
     if (item === "") continue;
-    if (isKnowledgePath(item)) {
-      documents.add(item);
-      continue;
-    }
-    const source: DocSource = item.startsWith("molab:") ? sourceOf(item) : REFERENCE.test(item) ? { kind: "reference", ref: item } : { kind: "file", ref: item };
-    sources.set(`${source.kind}:${source.ref}`, source);
+    (isKnowledgePath(item) ? documents : sources).add(item);
   }
-  return { sources: [...sources.values()], documents: [...documents] };
+  return { sources: [...sources], cites: [...documents].map((target) => ({ target })) };
 }

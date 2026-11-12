@@ -25,9 +25,9 @@ export interface FakeDoc {
   hostPath: string;
   createdBy: string;
   body: string;
-  sources: { kind: string; ref: string }[];
+  sources: string[];
   edges: { target: string; role: string }[];
-  extra: Record<string, unknown>;
+  fields: Record<string, unknown>;
 }
 
 export interface FakeMolab {
@@ -52,7 +52,9 @@ export interface FakeMolab {
 }
 
 const PROJECT = "P1";
-const SOURCED = ["Report", "Finding", "Plan", "Observation"];
+/** As molab's content rule: a Report or Finding rests on an asset, run or execution. */
+const EVIDENCED = ["Report", "Finding"];
+const ANCHOR = /^molab:(asset\/|experiment\/[^/]+\/run\/)/;
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -108,7 +110,7 @@ export async function startFakeMolab(root = "/tmp/fake-ws/projects/polymer"): Pr
       failedRuns: all.filter((run) => run.status === "failed"),
       runningRuns: all.filter((run) => run.status === "queued" || run.status === "running"),
       assets: [],
-      knowledge: [...docs.entries()].map(([path, doc]) => ({ path, type: doc.cls, title: doc.name, id: null })),
+      knowledge: [...docs.entries()].map(([path, doc]) => ({ path, cls: doc.cls, title: doc.name })),
       staleOrMissing: [],
     };
   };
@@ -180,7 +182,7 @@ export async function startFakeMolab(root = "/tmp/fake-ws/projects/polymer"): Pr
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
       const hits = [...docs.entries()]
         .filter(([, doc]) => doc.body.toLowerCase().includes(q) || doc.name.toLowerCase().includes(q))
-        .map(([relPath, doc]) => ({ path: relPath, title: doc.name, type: doc.cls, tags: [], snippet: doc.body.slice(0, 80), source: "workspace" }));
+        .map(([relPath, doc]) => ({ path: relPath, title: doc.name, cls: doc.cls, tags: [], snippet: doc.body.slice(0, 80), source: "workspace" }));
       return send(200, { hits, truncated: false });
     }
     if (method === "POST" && path === "/api/knowledge/doc") {
@@ -188,11 +190,18 @@ export async function startFakeMolab(root = "/tmp/fake-ws/projects/polymer"): Pr
       const hostPath = String(body?.hostPath ?? "");
       const relPath = `${hostPath === "" ? "" : `${hostPath}/`}knowledges/${slug(name)}.md`;
       const cls = String(body?.cls ?? "Note");
-      const sources = (body?.sources as FakeDoc["sources"]) ?? [];
-      const { name: _name, hostPath: _host, cls: _cls, sources: _sources, body: _body, createdBy, ...extra } = body ?? {};
-      if (SOURCED.includes(cls) && sources.length === 0) return fail(422, `${cls} requires at least one SourceRef`);
-      if (sources.some((source) => source.kind === "reference" && !/^(https?:\/\/|doi:|10\.)/i.test(source.ref))) return fail(422, "reference is not an http(s) URL or a DOI");
-      if (sources.some((source) => source.kind === "file" && !files.has(source.ref))) return fail(422, "file source is not a file in this workspace");
+      const sources = (body?.sources as string[] | undefined) ?? [];
+      const cites = ((body?.cites as { target: string; role?: string }[] | undefined) ?? []).map((cite) => ({ target: cite.target, role: cite.role ?? "cites" }));
+      const fields = (body?.fields as Record<string, unknown> | undefined) ?? {};
+      const createdBy = body?.createdBy;
+      const resolves = (item: string) => item.startsWith("molab:") || /^(https?:\/\/|doi:|10\.)/i.test(item) || files.has(item);
+      const missing = sources.find((item) => !resolves(item));
+      if (missing !== undefined) return fail(422, `source ${missing} names nothing in this workspace`);
+      const dangling = cites.find((cite) => !cite.target.startsWith("molab:") && !docs.has(cite.target));
+      if (dangling !== undefined) return fail(422, `cite target ${dangling.target} names nothing`);
+      if (EVIDENCED.includes(cls) && ![...sources, ...cites.map((cite) => cite.target)].some((item) => ANCHOR.test(item))) {
+        return fail(422, `knowledge.unanchored: a ${cls} links no molab: asset, run or execution`);
+      }
       const prior = docs.get(relPath);
       const summary = { name, title: name, relPath, hostPath, excerpt: "", cls };
       if (prior !== undefined) {
@@ -200,18 +209,11 @@ export async function startFakeMolab(root = "/tmp/fake-ws/projects/polymer"): Pr
         if (prior.cls !== cls) return fail(422, `${relPath} is a ${prior.cls}, not a ${cls}`);
         rewrites.push(relPath);
         const text = String(body?.body ?? "");
-        docs.set(relPath, { ...prior, body: text === "" ? prior.body : text, sources: sources.length > 0 ? sources : prior.sources, extra: { ...prior.extra, ...extra } });
+        docs.set(relPath, { ...prior, body: text === "" ? prior.body : text, sources: sources.length > 0 ? sources : prior.sources, edges: [...prior.edges, ...cites], fields: { ...prior.fields, ...fields } });
         return send(201, summary);
       }
-      docs.set(relPath, { cls, name, hostPath, createdBy: String(createdBy ?? "ui"), body: String(body?.body ?? ""), sources, edges: [], extra });
+      docs.set(relPath, { cls, name, hostPath, createdBy: String(createdBy ?? "ui"), body: String(body?.body ?? ""), sources, edges: cites, fields });
       return send(201, summary);
-    }
-    if (method === "POST" && path === "/api/knowledge/doc/embed") {
-      const doc = docs.get(url.searchParams.get("path") ?? "");
-      if (doc === undefined) return fail(404, "note not found");
-      if (body?.target_kind === "reference" && !docs.has(String(body.target))) return fail(404, "reference not found");
-      doc.edges.push({ target: String(body?.target), role: String(body?.role ?? "cites") });
-      return send(200, { srcPath: url.searchParams.get("path"), target: body?.target, role: body?.role });
     }
     if (method === "DELETE" && path === "/api/knowledge/doc") {
       const relPath = url.searchParams.get("path") ?? "";

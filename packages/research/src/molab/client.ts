@@ -9,7 +9,6 @@
  */
 import { z } from "zod";
 import {
-  type DocSource,
   DryRun,
   Execution,
   ExecutionOutputs,
@@ -53,23 +52,22 @@ export interface CreateExecution {
   requestedBy: string;
 }
 
-/** Bibliographic fields molab stores on a Literature document. */
-export interface LiteratureMeta {
-  title?: string;
-  authors?: string[];
-  year?: number;
-  doi?: string;
-  venue?: string;
-  url?: string;
+/** One typed edge a new document carries: a knowledge document path or a molab: ref. */
+export interface DocCite {
+  target: string;
+  role?: string;
 }
 
-export interface CreateDoc extends LiteratureMeta {
+export interface CreateDoc {
   name: string;
   cls: KnowledgeClass;
   hostPath?: string;
   body: string;
-  sources: DocSource[];
-  record?: Record<string, unknown>;
+  /** What the document rests on: molab: refs, URLs or DOIs, workspace files. */
+  sources: string[];
+  cites: DocCite[];
+  /** The fields its class declares; molab refuses any other key. */
+  fields?: Record<string, unknown>;
   createdBy: string;
 }
 
@@ -182,11 +180,6 @@ export class MolabClient {
   /** Write a document; the same name under the same host rewrites it in place. */
   createDoc(body: CreateDoc, signal?: AbortSignal): Promise<NoteSummary> {
     return this.#call(NoteSummary, "POST", "/api/knowledge/doc", body, signal);
-  }
-
-  /** Link document `path` to the knowledge document `target` it cites. */
-  cite(path: string, target: string, signal?: AbortSignal): Promise<unknown> {
-    return this.#call(anyJson, "POST", `/api/knowledge/doc/embed?${new URLSearchParams({ path })}`, { target_kind: "reference", target, role: "cites" }, signal);
   }
 
   /** Delete a document; molab's history keeps what it said. */
