@@ -70,11 +70,11 @@ export const PROFILE_TEMPLATES: Readonly<Record<string, readonly string[]>> = {
   /** `tack run` as a supervisor: it reads and answers, and the official subagent plugins do the workspace work. */
   supervise: [RUNTIME_BUNDLE_BASE, RUNTIME_BUNDLE_HEADLESS, TACK_BUNDLE_BASE, TACK_BUNDLE_RUN, ...RUNTIME_AGENT_PLUGINS, TACK_BUNDLE_SUPERVISE],
   /**
-   * `tack web --profile research`: research supervision over a Molab scope. Web-based because
-   * waiting on compute needs a host that outlives the turn and can wake a session.
+   * `tack web --profile research`: Molab-bound research. Web-based because approving compute
+   * needs an answerer and waiting on it needs the schedule service, both web-host rows.
    */
   research: [RUNTIME_BUNDLE_BASE, RUNTIME_BUNDLE_WEB, TACK_BUNDLE_BASE, TACK_BUNDLE_UI, ...RUNTIME_AGENT_PLUGINS, TACK_BUNDLE_RESEARCH],
-  /** `tack run --profile research-run`: one research step per run; the delegation carries on in Molab. */
+  /** `tack run --profile research-run`: the molab tools on the headless stack, for reading and recording. */
   "research-run": [RUNTIME_BUNDLE_BASE, RUNTIME_BUNDLE_HEADLESS, TACK_BUNDLE_BASE, TACK_BUNDLE_RUN, ...RUNTIME_AGENT_PLUGINS, TACK_BUNDLE_RESEARCH_RUN],
 };
 

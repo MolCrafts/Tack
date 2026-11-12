@@ -1,10 +1,10 @@
 /**
  * The research profile composes cleanly over the web app: the tack-research
- * row, the Research preset as the default, DSH's own subagent providers left
- * on (research_dispatch starts workers through them), and host-plane boots
+ * row, the Research preset as the default with DSH's schedule and subagent
+ * tools, DSH's own subagent providers left on, and host-plane boots
  * (`doctor`, `model`) leave the research rows off, as they do for every app
  * composition — so `doctor --tools` lists no research tool; the tool list is
- * checked in the unit suite (research-model).
+ * checked in the unit suite (research-tools).
  */
 import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
 import { rmSync } from "node:fs";
@@ -50,9 +50,16 @@ describe("research profile", () => {
     expect(row("subagent-codex").name).toBe("@tack/codex");
   });
 
-  it("the Research preset executes with DSH's shell and file tools", () => {
+  it("the Research preset executes with DSH's shell and file tools, schedules checks and starts subagents", () => {
     const preset = row("preset-research").lines.join("\n");
-    for (const tool of ["dsh-tool-bash", "'@deepseek-ai/dsh-tool-fs'"]) expect(preset).toContain(tool);
+    for (const tool of ["dsh-tool-bash", "'@deepseek-ai/dsh-tool-fs'", "'@deepseek-ai/dsh-tool-schedule'", "'@deepseek-ai/dsh-tool-subagent'", "'@deepseek-ai/dsh-tool-ask-user'"]) expect(preset).toContain(tool);
+  });
+
+  it("keeps DSH's schedule service and approval seam on: waiting and approval depend on them", () => {
+    expect(row("schedule").name).toBe("@deepseek-ai/dsh-schedule");
+    expect(row("schedule").disabled).toBeUndefined();
+    expect(row("approval").name).toBe("@deepseek-ai/dsh-user-approval");
+    expect(row("ui-approval").disabled).toBeUndefined();
   });
 
   it("boots the host plane without activating research rows or warnings", async () => {
@@ -76,7 +83,7 @@ describe("research-run profile", () => {
 });
 
 describe("research persona", () => {
-  it("is the same text in the web preset and the headless profile, and steers workers through research_dispatch", async () => {
+  it("is the same text in the web preset and the headless profile, and names only tools that exist", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const { REPO_ROOT } = await import("../helpers.js");
@@ -85,26 +92,12 @@ describe("research persona", () => {
     const run = readFileSync(join(REPO_ROOT, "bundles/research-run/cordis.patch.yml"), "utf8").match(/personaPrefix: >-\n([\s\S]*)$/)![1]!;
     expect(flat(run)).toBe(flat(web));
     const persona = flat(web);
-    expect(persona).toContain("ask_human");
-    expect(persona).toContain("research_dispatch");
-    expect(persona).toContain("do not probe the workspace before dispatching");
-    expect(persona).toContain("research_assess with report");
-    expect(persona).toContain("Closing (conclude or stop) is the last call");
-    // The four human gates, in order, and the rule behind them.
-    for (const gate of ["Gate 1, parameters", "Gate 2, plan", "Gate 3, dry run", "Gate 4, results"]) expect(persona).toContain(gate);
-    expect(persona.indexOf("Gate 1, parameters")).toBeLessThan(persona.indexOf("Gate 2, plan"));
-    expect(persona.indexOf("Gate 2, plan")).toBeLessThan(persona.indexOf("Gate 3, dry run"));
-    expect(persona.indexOf("Gate 3, dry run")).toBeLessThan(persona.indexOf("Gate 4, results"));
-    expect(persona).toContain("never fabricate an approval");
-    expect(persona).toContain("research_dispatch with mode draft");
-    expect(persona).toContain("research_resume with their words, passing approve {gate: plan, target: <plan path>} only when they clearly approved that path");
-    expect(persona).toContain("never guess a parameter");
-    expect(persona).toContain("revising the same plan (research_plan, same name, with a reason)");
-    expect(persona).toContain("citing at least one molab: ref, under a stable name");
-    expect(persona).toContain("never link them from a report");
-    expect(persona).not.toContain("HTML page");
-    expect(persona).not.toContain("decision Observations");
-    expect(persona).not.toContain("execute the plan yourself");
-    expect(persona).not.toContain("subagent_codex");
+    expect(persona.split(" ").length).toBeLessThanOrEqual(260);
+    const { researchTools } = await import("../../packages/research/src/index.js");
+    const names = new Set([...researchTools({} as never).map((spec) => spec.name), "ask_user_question", "schedule_create"]);
+    const named = persona.match(/\b[a-z]+_[a-z_]+\b/g) ?? [];
+    expect(named.filter((name) => !names.has(name))).toEqual([]);
+    for (const step of ["molab_dry_run", "molab_start_execution", "schedule_create", "molab_read_outputs", "never guess a parameter"]) expect(persona).toContain(step);
+    for (const gone of ["gate", "delegation", "research_", "TACK-GATE"]) expect(persona.toLowerCase()).not.toContain(gone.toLowerCase());
   });
 });

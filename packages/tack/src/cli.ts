@@ -11,7 +11,6 @@
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 import type { ModelInvocation } from "./models.js";
 import type { PluginAction } from "./plugin.js";
-import { type AmendInvocation, type ReplayInvocation, parseBudget } from "./research.js";
 
 export type Invocation =
   | { mode: "help" }
@@ -20,8 +19,6 @@ export type Invocation =
   | { mode: "plugin"; action: PluginAction; profile: string; names: string[] }
   | { mode: "run"; profile: string; patches: string[]; args: string[]; model?: string }
   | { mode: "web"; profile: string; patches: string[]; args: string[] }
-  | AmendInvocation
-  | ReplayInvocation
   | ModelInvocation;
 
 export const DEFAULT_RUN_PROFILE = "default";
@@ -59,8 +56,6 @@ Examples:
   tack model use anthropic/claude-sonnet-4-5
                                       switch the default model in every Tack profile
   tack run --model openai/gpt-5 "task"   use another model for one run
-  tack research amend <delegation> --budget worker_runs=10 --reason "..."
-                                      widen a research delegation's budget
 `;
 
 /** Build the commander program. `resolved` receives the parsed invocation. */
@@ -199,47 +194,6 @@ export function buildProgram(resolve: (invocation: Invocation) => void): Command
         profile: options.profile ?? DEFAULT_RUN_PROFILE,
         dumpConfig: options.dumpConfig === true,
         tools: options.tools === true,
-      });
-    });
-
-  const research = program.command("research").description("inspect research history or act on a delegation");
-  research.command("replay")
-    .description("replay the recorded research sequence without executing compute")
-    .option("--project <id>", "project id")
-    .option("--experiment <id>", "experiment id")
-    .option("--run <id>", "run id")
-    .option("--kind <kind>", "experiment, run, execution, knowledge, asset or history")
-    .option("--offset <number>", "event offset", "0")
-    .option("--limit <number>", "events per page (1–200)", "50")
-    .option("--as-of <time>", "upper timestamp from the previous page")
-    .option("--json", "emit the complete structured page", false)
-    .option("--molab-url <url>", "molab serve URL", process.env.MOLAB_URL ?? "http://localhost:8000")
-    .action((options: { project?: string; experiment?: string; run?: string; kind?: ReplayInvocation["query"]["kind"]; offset: string; limit: string; asOf?: string; json: boolean; molabUrl: string }) => {
-      resolve({ mode: "research", action: "replay", query: {
-        ...(options.project && { projectId: options.project }), ...(options.experiment && { experimentId: options.experiment }),
-        ...(options.run && { runId: options.run }), ...(options.kind && { kind: options.kind }),
-        ...(options.asOf && { asOf: options.asOf }), offset: Number(options.offset), limit: Number(options.limit),
-      }, json: options.json, molabUrl: options.molabUrl });
-    });
-  research
-    .command("amend")
-    .description("widen a delegation's budget or authority, with a recorded reason")
-    .argument("<delegation>", "workspace-relative path of the Delegation document")
-    .requiredOption("--reason <text>", "why the terms change (recorded on the delegation)")
-    .option("--budget <key=value>", "new limit for a budget line (worker_usd, worker_runs, executions, wall_hours); repeatable", collect, [])
-    .option("--add-action <action>", "grant one more action; repeatable", collect, [])
-    .option("--by <name>", "who amends", process.env.USER ?? "operator")
-    .option("--molab-url <url>", "molab serve URL", process.env.MOLAB_URL ?? "http://localhost:8000")
-    .action((delegation: string, options: { reason: string; budget: string[]; addAction: string[]; by: string; molabUrl: string }) => {
-      resolve({
-        mode: "research",
-        action: "amend",
-        delegation,
-        budget: parseBudget(options.budget),
-        addActions: options.addAction,
-        reason: options.reason,
-        by: options.by,
-        molabUrl: options.molabUrl,
       });
     });
 

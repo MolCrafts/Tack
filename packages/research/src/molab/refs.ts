@@ -38,15 +38,6 @@ export function parseRef(ref: string): ParsedRef {
     `not a molab project, experiment, run or execution ref: ${ref}. ` +
       "Write it as molab:project/<project id>, molab:experiment/<experiment id>, " +
       "molab:experiment/<experiment id>/run/<run id> or …/run/<run id>/execution/<execution id>; " +
-      "ids, not names or paths (research_context lists them).",
+      "ids, not names or paths (molab_context lists them).",
   );
-}
-
-/** The DocSource kind a scope ref is cited as. */
-export function sourceKindOf(ref: string): "project" | "experiment" | "run" {
-  const parsed = parseRef(ref);
-  if (parsed.run !== undefined) return "run";
-  if (parsed.experiment !== undefined) return "experiment";
-  if (parsed.project !== undefined) return "project";
-  throw new Error(`a source must be a project, experiment or run ref: ${ref}`);
 }

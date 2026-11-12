@@ -8,7 +8,6 @@ import { helpText, parseTackArgs } from "./cli.js";
 import { formatVersion, runApp } from "./commands.js";
 import { runModelAction } from "./models.js";
 import { runPluginAction } from "./plugin.js";
-import { runResearchAmend, runResearchReplay } from "./research.js";
 import { collectDoctorReport, doctorExitCode, formatDoctorReport } from "./doctor.js";
 import { resolveTackHome } from "./home.js";
 import { PROFILE_TEMPLATES, REQUIRED_ROW_IDS, bindHome, loadRuntime } from "./runtime/dsh.js";
@@ -45,18 +44,6 @@ async function main(): Promise<void> {
 
   if (invocation.mode === "help") {
     process.stdout.write(helpText());
-    return;
-  }
-
-  if (invocation.mode === "research") {
-    try {
-      process.exitCode = invocation.action === "replay"
-        ? await runResearchReplay(invocation, (line) => process.stdout.write(line))
-        : await runResearchAmend(invocation, (line) => process.stdout.write(line));
-    } catch (error) {
-      process.stderr.write(`tack: ${error instanceof Error ? error.message : String(error)}\n`);
-      process.exitCode = 1;
-    }
     return;
   }
 

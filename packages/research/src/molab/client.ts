@@ -1,5 +1,6 @@
 /**
- * A typed client for the slice of `molab serve`'s HTTP API Tack uses.
+ * A typed client for the slice of `molab serve`'s HTTP API the research tools
+ * call.
  *
  * Scope is the server's job: `molab serve` opened at a project / experiment /
  * run exposes only that node and its descendants, so every call here is
@@ -8,25 +9,17 @@
  */
 import { z } from "zod";
 import {
-  DocRecord,
   type DocSource,
   DryRun,
   Execution,
+  ExecutionOutputs,
   Experiment,
-  DocPage,
-  KnowledgeGraph,
-  KnowledgeList,
+  type KnowledgeClass,
   LogChunk,
-  NoteDetail,
   NoteSummary,
-  Project,
   Run,
-  ReplayPage,
-  ReplayQuery,
   SearchHits,
-  ServedValidation,
-  ServeScope,
-  WorkspaceInfo,
+  WorkspaceContext,
 } from "./schemas.js";
 
 export class MolabError extends Error {
@@ -57,13 +50,22 @@ export interface CreateExecution {
   mode?: "initial" | "rerun" | "resume" | "reproduce";
   basedOnExecutionId?: string;
   target?: string;
-  requestKey: string;
   requestedBy: string;
 }
 
-export interface CreateDoc {
+/** Bibliographic fields molab stores on a Literature document. */
+export interface LiteratureMeta {
+  title?: string;
+  authors?: string[];
+  year?: number;
+  doi?: string;
+  venue?: string;
+  url?: string;
+}
+
+export interface CreateDoc extends LiteratureMeta {
   name: string;
-  cls: string;
+  cls: KnowledgeClass;
   hostPath?: string;
   body: string;
   sources: DocSource[];
@@ -118,47 +120,12 @@ export class MolabClient {
     return parsed.data;
   }
 
-  // ── Scope and structure ────────────────────────────────────────────────────
-  scope(signal?: AbortSignal): Promise<ServeScope> {
-    return this.#call(ServeScope, "GET", "/api/workspace/scope", undefined, signal);
-  }
-
-  replay(options: Partial<ReplayQuery> = {}, signal?: AbortSignal): Promise<ReplayPage> {
-    const query = new URLSearchParams();
-    for (const [key, value] of Object.entries(ReplayQuery.parse(options))) {
-      if (value !== undefined) query.set(key, String(value));
-    }
-    return this.#call(ReplayPage, "GET", `/api/history/replay?${query}`, undefined, signal);
-  }
-
-  replayDocument(commit: string, document: string, signal?: AbortSignal): Promise<z.infer<typeof NoteDetail>> {
-    const query = new URLSearchParams({ commit, document });
-    return this.#call(NoteDetail, "GET", `/api/history/replay/document?${query}`, undefined, signal);
-  }
-
-  /** The served directory on disk (where workers run). */
-  async root(signal?: AbortSignal): Promise<string> {
-    return (await this.#call(WorkspaceInfo, "GET", "/api/workspace/info", undefined, signal)).root;
-  }
-
+  // ── Structure ──────────────────────────────────────────────────────────────
   /** The structural snapshot molab builds for agents (projects, experiments, recent and failed runs, knowledge). */
-  context(query: { projectId?: string; experimentId?: string; runId?: string } = {}, signal?: AbortSignal): Promise<unknown> {
+  context(query: { projectId?: string; experimentId?: string; runId?: string } = {}, signal?: AbortSignal): Promise<WorkspaceContext> {
     const params = new URLSearchParams(Object.entries(query).filter((entry): entry is [string, string] => entry[1] !== undefined));
     const suffix = params.size > 0 ? `?${params}` : "";
-    return this.#call(anyJson, "GET", `/api/workspace/context${suffix}`, undefined, signal);
-  }
-
-  /** molab's layout and knowledge rules over the served scope (`molab validate`, bounded). Writes nothing. */
-  validate(errorsOnly = false, signal?: AbortSignal): Promise<ServedValidation> {
-    return this.#call(ServedValidation, "GET", `/api/workspace/validate${errorsOnly ? "?errorsOnly=true" : ""}`, undefined, signal);
-  }
-
-  listProjects(signal?: AbortSignal): Promise<Project[]> {
-    return this.#call(Project.array(), "GET", "/api/projects", undefined, signal);
-  }
-
-  listExperiments(project: string, signal?: AbortSignal): Promise<Experiment[]> {
-    return this.#call(Experiment.array(), "GET", `/api/projects/${seg(project)}/experiments`, undefined, signal);
+    return this.#call(WorkspaceContext, "GET", `/api/workspace/context${suffix}`, undefined, signal);
   }
 
   createExperiment(
@@ -166,10 +133,6 @@ export class MolabClient {
     body: { name: string; description?: string; parameterSpace?: Record<string, unknown>; workflowSource?: Record<string, unknown>; defaultTarget?: string },
   ): Promise<Experiment> {
     return this.#call(Experiment, "POST", `/api/projects/${seg(project)}/experiments`, body);
-  }
-
-  listRuns(project: string, experiment: string, signal?: AbortSignal): Promise<Run[]> {
-    return this.#call(Run.array(), "GET", `/api/projects/${seg(project)}/experiments/${seg(experiment)}/runs`, undefined, signal);
   }
 
   createRun(project: string, experiment: string, body: { params: Record<string, unknown>; target?: string }): Promise<Run> {
@@ -186,34 +149,23 @@ export class MolabClient {
   }
 
   // ── Attempts ───────────────────────────────────────────────────────────────
-  listExecutions(at: RunLocator, signal?: AbortSignal): Promise<Execution[]> {
-    return this.#call(Execution.array(), "GET", `${runPath(at)}/executions`, undefined, signal);
-  }
-
-  getExecution(at: RunLocator, execution: string, signal?: AbortSignal): Promise<Execution> {
-    return this.#call(Execution, "GET", `${runPath(at)}/executions/${seg(execution)}`, undefined, signal);
-  }
-
-  /** Create one attempt; molab submits it. Idempotent per `requestKey`. */
-  createExecution(at: RunLocator, body: CreateExecution): Promise<Execution> {
-    return this.#call(Execution, "POST", `${runPath(at)}/executions`, body);
+  /** Create one attempt; molab submits it. */
+  createExecution(at: RunLocator, body: CreateExecution, signal?: AbortSignal): Promise<Execution> {
+    return this.#call(Execution, "POST", `${runPath(at)}/executions`, body, signal);
   }
 
   cancelExecution(at: RunLocator, execution: string): Promise<unknown> {
     return this.#call(anyJson, "POST", `${runPath(at)}/executions/${seg(execution)}/cancel`);
   }
 
-  async outputs(at: RunLocator, execution: string, signal?: AbortSignal): Promise<unknown> {
+  /** One attempt's outputs; refused when they carry an asset of another run, project or attempt. */
+  async outputs(at: RunLocator, execution: string, signal?: AbortSignal): Promise<ExecutionOutputs> {
     const endpoint = `${runPath(at)}/executions/${seg(execution)}/outputs`;
-    const value = await this.#call(anyJson, "GET", endpoint, undefined, signal);
-    if (typeof value === "object" && value !== null && "assets" in value && Array.isArray(value.assets)) {
+    const value = await this.#call(ExecutionOutputs, "GET", endpoint, undefined, signal);
+    if (value.assets.length > 0) {
       const run = await this.getRun(at, signal);
-      for (const asset of value.assets) {
-        if (asset?.runId !== run.id || asset?.executionId !== execution ||
-            asset?.projectId !== run.projectId) {
-          throw new MolabError(200, "outputs contain an asset from another run, project or execution; refusing mixed evidence", `GET ${endpoint}`);
-        }
-      }
+      const foreign = value.assets.some((asset) => asset.runId !== run.id || asset.executionId !== execution || asset.projectId !== run.projectId);
+      if (foreign) throw new MolabError(200, "outputs contain an asset from another run, project or execution; refusing mixed evidence", `GET ${endpoint}`);
     }
     return value;
   }
@@ -223,72 +175,37 @@ export class MolabClient {
   }
 
   // ── Knowledge ──────────────────────────────────────────────────────────────
-  async listDocs(signal?: AbortSignal): Promise<NoteSummary[]> {
-    return (await this.#call(KnowledgeList, "GET", "/api/knowledge", undefined, signal)).notes;
+  search(q: string, signal?: AbortSignal): Promise<SearchHits> {
+    return this.#call(SearchHits, "GET", `/api/knowledge/search?${new URLSearchParams({ q })}`, undefined, signal);
   }
 
-  /** The whole knowledge graph in one read: documents and the typed links between them. */
-  knowledgeGraph(signal?: AbortSignal): Promise<KnowledgeGraph> {
-    return this.#call(KnowledgeGraph, "GET", "/api/knowledge/graph", undefined, signal);
+  /** Write a document; the same name under the same host rewrites it in place. */
+  createDoc(body: CreateDoc, signal?: AbortSignal): Promise<NoteSummary> {
+    return this.#call(NoteSummary, "POST", "/api/knowledge/doc", body, signal);
   }
 
-  search(q: string, cls?: string, signal?: AbortSignal): Promise<z.infer<typeof SearchHits>> {
-    const params = new URLSearchParams({ q, ...(cls !== undefined && { type: cls }) });
-    return this.#call(SearchHits, "GET", `/api/knowledge/search?${params}`, undefined, signal);
-  }
-
-  readDoc(path: string, signal?: AbortSignal): Promise<z.infer<typeof NoteDetail>> {
-    return this.#call(NoteDetail, "GET", `/api/knowledge/note?${new URLSearchParams({ path })}`, undefined, signal);
-  }
-
-  /** A document rendered the way a reader sees it: one self-contained HTML page. */
-  docPage(path: string, signal?: AbortSignal): Promise<z.infer<typeof DocPage>> {
-    return this.#call(DocPage, "GET", `/api/knowledge/doc/page?${new URLSearchParams({ path })}`, undefined, signal);
-  }
-
-  createDoc(body: CreateDoc): Promise<NoteSummary> {
-    return this.#call(NoteSummary, "POST", "/api/knowledge/doc", body);
-  }
-
-  /** Add one typed provenance edge from document `path` to `target` (e.g. role `supersedes` to an older plan). */
-  embed(path: string, body: { target_kind: "run" | "experiment" | "asset" | "reference"; target: string; role: "derived_from" | "cites" | "supersedes" | "supports" | "contradicts" | "records" | "references" }): Promise<unknown> {
-    return this.#call(anyJson, "POST", `/api/knowledge/doc/embed?${new URLSearchParams({ path })}`, body);
-  }
-
-  /** Rewrite a document's narrative (its frontmatter and edges' history stay). */
-  writeBody(path: string, body: string): Promise<unknown> {
-    return this.#call(anyJson, "PUT", `/api/knowledge/doc?${new URLSearchParams({ path })}`, { body });
-  }
-
-  /** Set a document's lifecycle status and/or tags (e.g. status "retracted"). */
-  setMeta(path: string, body: { status?: string; tags?: string[] }): Promise<NoteSummary> {
-    return this.#call(NoteSummary, "PATCH", `/api/knowledge/doc/meta?${new URLSearchParams({ path })}`, body);
+  /** Link document `path` to the knowledge document `target` it cites. */
+  cite(path: string, target: string, signal?: AbortSignal): Promise<unknown> {
+    return this.#call(anyJson, "POST", `/api/knowledge/doc/embed?${new URLSearchParams({ path })}`, { target_kind: "reference", target, role: "cites" }, signal);
   }
 
   /** Delete a document; molab's history keeps what it said. */
-  deleteDoc(path: string): Promise<unknown> {
-    return this.#call(anyJson, "DELETE", `/api/knowledge/doc?${new URLSearchParams({ path })}`);
-  }
-
-  getRecord(path: string, signal?: AbortSignal): Promise<DocRecord> {
-    return this.#call(DocRecord, "GET", `/api/knowledge/doc/record?${new URLSearchParams({ path })}`, undefined, signal);
-  }
-
-  /** Replace a document's record whole; a stale `ifMatch` is a 409 {@link MolabError}. */
-  replaceRecord(path: string, body: { record: Record<string, unknown>; ifMatch: string; body?: string }): Promise<DocRecord> {
-    return this.#call(DocRecord, "PATCH", `/api/knowledge/doc/record?${new URLSearchParams({ path })}`, body);
+  deleteDoc(path: string, signal?: AbortSignal): Promise<unknown> {
+    return this.#call(anyJson, "DELETE", `/api/knowledge/doc?${new URLSearchParams({ path })}`, undefined, signal);
   }
 }
 
-
 function detailOf(text: string): string {
+  let body: unknown;
   try {
-    const body = JSON.parse(text) as { detail?: unknown; message?: unknown };
-    const detail = body.detail ?? body.message;
+    body = JSON.parse(text);
+  } catch {
+    return text.slice(0, 500) || "(empty body)";
+  }
+  if (typeof body === "object" && body !== null) {
+    const detail = (body as { detail?: unknown; message?: unknown }).detail ?? (body as { message?: unknown }).message;
     if (typeof detail === "string") return detail;
     if (detail !== undefined) return JSON.stringify(detail);
-  } catch {
-    // not JSON: fall through to the raw text
   }
   return text.slice(0, 500) || "(empty body)";
 }

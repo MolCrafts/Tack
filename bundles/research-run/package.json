@@ -1,7 +1,7 @@
 {
   "name": "@tack/research-run",
   "version": "0.1.0",
-  "description": "Tack research supervision for `tack run`: the research tools and supervisor persona on the headless stack; workers keep their tools",
+  "description": "Tack research for `tack run`: the molab tools and research persona on the headless stack",
   "license": "MIT",
   "files": [
     "cordis.patch.yml"

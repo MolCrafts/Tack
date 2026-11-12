@@ -50,7 +50,7 @@ describe("tack run against a model", () => {
     expect(result.code, result.stderr).toBe(0);
     expect(result.stderr).not.toContain("did not activate");
     const requests = model.agentRequests().slice(before);
-    for (const name of ["molplot_chart", "molplot_serve", "molvis_stage", "molvis_sketch", "research_context"]) expect(requests[0]!.tools).toContain(name);
+    for (const name of ["molplot_chart", "molplot_serve", "molvis_stage", "molvis_sketch", "molab_context", "molab_start_execution", "molab_write_knowledge"]) expect(requests[0]!.tools).toContain(name);
     expect(contentText(requests[1]!.messages.find(m => m.role === "tool")?.content)).toContain("ENOENT");
   });
 
