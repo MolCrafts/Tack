@@ -30,7 +30,11 @@ export function molabWriteKnowledge(deps: ResearchDeps): ToolSpec<WriteArgs> {
       cls: { type: "string", required: true, enum: [...KNOWLEDGE_CLASSES] },
       name: { type: "string", required: true, description: "Document name; the same name under the same host rewrites it." },
       body: { type: "string", required: true, description: "The narrative, in Markdown." },
-      host: { type: "string", description: "Workspace-relative directory (a project, experiment or run path) to file it under; default the served root." },
+      host: {
+        type: "string",
+        description:
+          "The project, experiment or run folder to file it under, as a path relative to the served root (the node `molab serve` opened), not to the workspace: when molab serves a project, '.' is that project and 'experiments/<name>' one of its experiments. Omitted, the served root. A molab: ref is not accepted.",
+      },
       sources: { type: "array", items: { type: "string" }, description: "molab: refs, URLs or DOIs, workspace files and knowledge document paths it rests on." },
       fields: {
         type: "object",
@@ -64,9 +68,9 @@ export function molabDeleteKnowledge(deps: ResearchDeps): ToolSpec<{ path: strin
     name: "molab_delete_knowledge",
     description:
       "Delete a knowledge document written in error (a duplicate, a wrong report or plan). molab's history keeps what it said. Write the correct document instead of keeping the wrong one beside it.",
-    parameters: { path: { type: "string", required: true, description: "Workspace-relative path of the document." } },
+    parameters: { path: { type: "string", required: true, description: "The document's path relative to the served root, as molab_write_knowledge reports it." } },
     async execute(args, exec) {
-      if (args.path.trim() === "") throw new Error("name the document by its workspace-relative path");
+      if (args.path.trim() === "") throw new Error("name the document by its path relative to the served root");
       await deps.molab.deleteDoc(args.path.trim(), exec.signal);
       return { text: `Deleted ${args.path.trim()}.` };
     },
