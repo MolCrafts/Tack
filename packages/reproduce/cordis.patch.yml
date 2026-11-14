@@ -7,8 +7,10 @@
 # against the Spec, and only the Judge reads the Milestones. This is context isolation, not a
 # security boundary: every role could read any file of the workspace.
 #
-# Lessons enter a role's instructions only through a reviewed change to this
-# file; the Judge proposes them as Notes.
+# Lessons are the project's Notes: the Judge proposes one (fields.status:
+# proposed), a person reviews it and sets its status to active, and every
+# role's persona receives the active Notes through `{{molab_active_notes}}`,
+# which @tack/research reads from molab when the role's session starts.
 
 - insert:
     # ── Orchestrator ───────────────────────────────────────────────────────
@@ -95,7 +97,11 @@
                 runs; read them first with molab_context.
 
 
-                Lessons (reviewed): none yet.
+                Lessons (reviewed): the project's Notes in force, read from
+                Molab when this session started.
+
+
+                {{molab_active_notes}}
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
@@ -212,7 +218,11 @@
                 see them. Nobody answers questions; decide and record.
 
 
-                Lessons (reviewed): none yet.
+                Lessons (reviewed): the project's Notes in force, read from
+                Molab when this session started.
+
+
+                {{molab_active_notes}}
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
@@ -294,7 +304,11 @@
                 critical issues.
 
 
-                Lessons (reviewed): none yet.
+                Lessons (reviewed): the project's Notes in force, read from
+                Molab when this session started.
+
+
+                {{molab_active_notes}}
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
@@ -369,14 +383,19 @@
                 When a failure or near-miss has a general cause a future
                 reproduction should avoid, write a Note (fields.status:
                 proposed) with the failure, the diagnostic and the remedy,
-                without the criteria's values. A person reviews it before it
-                enters any role's instructions.
+                without the criteria's values. A person reviews it and sets
+                its status to active; only then does it enter the roles'
+                instructions.
 
 
                 Return the Report path and the verdict per checkpoint id.
 
 
-                Lessons (reviewed): none yet.
+                Lessons (reviewed): the project's Notes in force, read from
+                Molab when this session started.
+
+
+                {{molab_active_notes}}
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
