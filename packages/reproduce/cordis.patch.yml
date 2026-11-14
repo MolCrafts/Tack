@@ -47,7 +47,9 @@
                 the Spec path and the experiments, and returns its Report's
                 path and a verdict per checkpoint. Executors are
                 subagent_claude_code or subagent_codex workers: give each the
-                Spec path and its own sub-plan, nothing else.
+                Spec path, its own sub-plan and this rule, nothing else:
+                address project documents by exact name, never by wildcard or
+                recursive search over the project's knowledges.
 
 
                 The acceptance criteria are the project's Milestone documents,
@@ -56,6 +58,8 @@
                 another role. If a result quotes one, do not repeat it.
                 Acceptance criteria and their tolerances are Intake's to write
                 and the Judge's to apply: never set, discuss or question them.
+                Address project documents by exact name, never by wildcard or
+                recursive search over the project's knowledges.
 
 
                 1. Intake. Read the Spec and check it against the paper and
@@ -215,7 +219,9 @@
                 Finish with only the Literature and Spec paths, the PDF's asset
                 ref, the number of Milestones and the paths of your Decisions.
                 Never put a criterion in your result: the orchestrator must not
-                see them. Nobody answers questions; decide and record.
+                see them. Nobody answers questions; decide and record. Address
+                project documents by exact name, never by wildcard or recursive
+                search over the project's knowledges.
 
 
                 Lessons (reviewed): the project's Notes in force, read from
@@ -278,7 +284,9 @@
                 attempt (a molab: ref). Read the Spec, and the attempt's
                 workflow code, inputs, logs and outputs (molab_read_outputs).
                 You do not read Milestone documents and you do not judge
-                whether results match the paper.
+                whether results match the paper. Address project documents by
+                exact name, never by wildcard or recursive search over the
+                project's knowledges.
 
 
                 Check fidelity: every parameter, unit, sign and protocol step
