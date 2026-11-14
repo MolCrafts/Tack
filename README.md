@@ -175,6 +175,14 @@ paths become `cites` edges. A `Report` or `Finding` cites at least one
 links a page served from this machine: the MolPlot and MolVis pages are for
 looking during the session.
 
+**Notes in force.** A persona that writes `{{molab_active_notes}}` gets the
+served scope's Notes whose `fields.status` is `active` (molab's default
+lifecycle status): each one's name, path and body, or `none`. They are read
+from molab (`GET /api/knowledge?status=active`, then each body) once, when
+the session starts. A writer that wants review first proposes a Note under
+another status, `proposed`; a person sets it to `active`. A persona that does
+not write the variable reads nothing.
+
 `tack run --profile research-run` mounts the same tools and persona on the
 headless stack for reading and recording; it cannot start compute (no
 answerer) or schedule a check (no schedule service).

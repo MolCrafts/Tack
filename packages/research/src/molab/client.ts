@@ -14,6 +14,8 @@ import {
   ExecutionOutputs,
   Experiment,
   type KnowledgeClass,
+  KnowledgeDoc,
+  KnowledgeList,
   LogChunk,
   NoteSummary,
   Run,
@@ -175,6 +177,18 @@ export class MolabClient {
   // ── Knowledge ──────────────────────────────────────────────────────────────
   search(q: string, signal?: AbortSignal): Promise<SearchHits> {
     return this.#call(SearchHits, "GET", `/api/knowledge/search?${new URLSearchParams({ q })}`, undefined, signal);
+  }
+
+  /** Every document of the served scope; with `status`, only the Notes whose lifecycle status it is. */
+  listKnowledge(query: { status?: string } = {}, signal?: AbortSignal): Promise<KnowledgeList> {
+    const params = new URLSearchParams(Object.entries(query).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    const suffix = params.size > 0 ? `?${params}` : "";
+    return this.#call(KnowledgeList, "GET", `/api/knowledge${suffix}`, undefined, signal);
+  }
+
+  /** One document with its whole body, by its path relative to the served root. */
+  readDoc(path: string, signal?: AbortSignal): Promise<KnowledgeDoc> {
+    return this.#call(KnowledgeDoc, "GET", `/api/knowledge/note?${new URLSearchParams({ path })}`, undefined, signal);
   }
 
   /** Write a document; the same name under the same host rewrites it in place. */

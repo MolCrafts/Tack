@@ -1,8 +1,10 @@
 /**
  * The only place `@tack/research` touches DeepSeek Harness: a runtime-neutral
- * tool spec becomes a registered DSH tool, and a spec's approval request goes
+ * tool spec becomes a registered DSH tool, a spec's approval request goes
  * through DSH's approval seam (`ctx.approval`, dsh-user-approval), which
- * audits it in the session log and fails closed without an answerer.
+ * audits it in the session log and fails closed without an answerer, and the
+ * `{{molab_active_notes}}` prompt variable is resolved in DSH's system-prompt
+ * assembly.
  */
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { ToolCallId } from "@deepseek-ai/dsh-llm";
@@ -62,4 +64,38 @@ export function toDshTool(spec: ToolSpec<never>, approval: () => ApprovalPort | 
       return losslessValue(value) as never;
     },
   } as never);
+}
+
+/** The parts of a DSH prompt assembly (dsh-system-prompt's `PromptAssembly`) the variable reads and extends. */
+export interface PromptAssembly {
+  sections: { text: string; interpolate?: boolean }[];
+  contexts: { text: string; interpolate?: boolean }[];
+  variables: Record<string, string | undefined>;
+}
+
+/** The parts of DSH's `AssembleContext` the variable reads: the assembling agent, when there is one. */
+export interface AssembleContext {
+  agent?: object;
+  signal?: AbortSignal;
+}
+
+/**
+ * A `system-prompt/assemble` listener that gives `name` the text `resolve`
+ * reads, for every assembly whose sections or contexts reference `{{name}}`.
+ * An agent reads it once, at its first such assembly, so its instructions
+ * stay as they were when its session started; an assembly that does not
+ * reference it reads nothing. A failed read fails the assembly.
+ */
+export function promptVariable(name: string, resolve: (signal?: AbortSignal) => Promise<string>) {
+  const reference = `{{${name}}}`;
+  const perAgent = new WeakMap<object, string>();
+  const references = (entries: PromptAssembly["sections"]) => entries.some((entry) => entry.interpolate !== false && entry.text.includes(reference));
+  return async (_assembly: PromptAssembly, context: AssembleContext, next: () => Promise<PromptAssembly>): Promise<PromptAssembly> => {
+    const assembly = await next();
+    if (!references(assembly.sections) && !references(assembly.contexts)) return assembly;
+    const agent = context.agent;
+    const text = (agent === undefined ? undefined : perAgent.get(agent)) ?? (await resolve(context.signal));
+    if (agent !== undefined) perAgent.set(agent, text);
+    return { ...assembly, variables: { ...assembly.variables, [name]: text } };
+  };
 }

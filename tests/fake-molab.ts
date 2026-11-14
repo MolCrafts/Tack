@@ -185,6 +185,30 @@ export async function startFakeMolab(root = "/tmp/fake-ws/projects/polymer"): Pr
         .map(([relPath, doc]) => ({ path: relPath, title: doc.name, cls: doc.cls, tags: [], snippet: doc.body.slice(0, 80), source: "workspace" }));
       return send(200, { hits, truncated: false });
     }
+    if (method === "GET" && path === "/api/knowledge") {
+      // As molab's list: only a Note has a lifecycle status (`active` unless set), and `status` filters on it.
+      const status = url.searchParams.get("status");
+      const notes = [...docs.entries()]
+        .map(([relPath, doc]) => ({
+          name: doc.name,
+          title: doc.name,
+          relPath,
+          hostPath: doc.hostPath,
+          excerpt: doc.body.slice(0, 320),
+          tags: [],
+          status: doc.cls === "Note" ? String(doc.fields.status ?? "active") : null,
+          cls: doc.cls,
+        }))
+        .filter((row) => status === null || row.status === status)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return send(200, { notes, references: [], total: notes.length });
+    }
+    if (method === "GET" && path === "/api/knowledge/note") {
+      const relPath = url.searchParams.get("path") ?? "";
+      const doc = docs.get(relPath);
+      if (doc === undefined) return fail(404, `note ${JSON.stringify(relPath)} not found`);
+      return send(200, { name: doc.name, relPath, cls: doc.cls, body: doc.body, links: [], cards: [], fields: doc.fields, format: "md" });
+    }
     if (method === "POST" && path === "/api/knowledge/doc") {
       const name = String(body?.name);
       const hostPath = String(body?.hostPath ?? "");

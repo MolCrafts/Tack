@@ -47,6 +47,7 @@ describe("tool set", () => {
     apply({
       tools: { register: (tool) => { const name = (tool as { name: string }).name; registered.push(name); return () => disposed.push(name); } },
       get: () => undefined,
+      on: () => () => undefined,
       effect: (execute) => { effect = execute; },
     }, {});
     expect(registered).toEqual([]);
@@ -67,6 +68,7 @@ describe("tool set", () => {
         return () => live.delete(name);
       } },
       get: () => undefined,
+      on: () => () => undefined,
       effect: (execute) => { effect = execute; },
     }, {});
     expect(() => effect!()).toThrow("registry refused");

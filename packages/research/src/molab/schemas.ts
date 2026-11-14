@@ -64,6 +64,16 @@ export type LogChunk = z.infer<typeof LogChunk>;
 export const NoteSummary = z.looseObject({ name: z.string(), relPath: z.string(), cls: z.string() });
 export type NoteSummary = z.infer<typeof NoteSummary>;
 
+/** `GET /api/knowledge`: every document of the served scope (a Note carries its lifecycle status). */
+export const KnowledgeList = z.looseObject({
+  notes: z.array(z.looseObject({ name: z.string(), title: z.string().nullish(), relPath: z.string(), cls: z.string(), status: z.string().nullish() })),
+});
+export type KnowledgeList = z.infer<typeof KnowledgeList>;
+
+/** `GET /api/knowledge/note`: one document with its whole body. */
+export const KnowledgeDoc = z.looseObject({ name: z.string(), relPath: z.string(), cls: z.string(), body: z.string() });
+export type KnowledgeDoc = z.infer<typeof KnowledgeDoc>;
+
 export const SearchHits = z.looseObject({
   hits: z.array(z.looseObject({ path: z.string(), title: z.string(), cls: z.string() })),
   truncated: z.boolean(),
