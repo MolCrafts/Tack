@@ -382,10 +382,13 @@
 
 
                 Then write a Report (host: the project): what was reproduced,
-                what was not, and why. The Report and your result give verdicts
-                and measured values only, never the expected values,
-                tolerances or the criteria's wording: the orchestrator and
-                later sessions read them.
+                what was not, and why. The Report and your result give per
+                checkpoint only the verdict (met, missed or cannot evaluate)
+                and the measured values; never an expected value, a
+                tolerance, the criteria's wording, or what the paper shows or
+                describes, not even as a comparison ("above the paper's
+                value", "the opposite of the paper's trend"). The orchestrator
+                and later sessions read them.
 
 
                 When a failure or near-miss has a general cause a future
