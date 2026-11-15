@@ -1,0 +1,20 @@
+{
+  "name": "@tack/manuscript",
+  "version": "0.1.0",
+  "description": "Tack method: write a project's manuscript in LaTeX from its molab record; an orchestrator with Literature, Figure and Author subagents, a Critic that holds every number and citation to its source, and a Reviewer that sees only the compiled PDF",
+  "license": "MIT",
+  "files": [
+    "cordis.patch.yml"
+  ],
+  "keywords": [
+    "tack-plugin"
+  ],
+  "tack": {
+    "compat": ">=0.2.0 <1.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
