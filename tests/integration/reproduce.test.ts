@@ -1,9 +1,11 @@
 /**
  * @tack/reproduce, installed with `tack plugin add` into the research profile,
- * composes cleanly: the Reproduce orchestrator's subagent tool admits exactly
- * the Intake, Critic and Judge presets, each declared in the composition (an
- * undeclared id fails the Agent's mount), and no role can start subagents of
- * its own. A preset is composed only by the web host, so the lessons check
+ * composes cleanly: the Reproduce orchestrator starts Intake through its
+ * subagent tool and the Critic and Judge through its review tool, each a
+ * preset declared in the composition (an undeclared id fails the Agent's
+ * mount), and no role can start subagents of its own. The review tool runs
+ * the reviewers on TACK_REVIEW_PROVIDER / TACK_REVIEW_MODEL when both are
+ * set. A preset is composed only by the web host, so the lessons check
  * starts `tack web` and opens one session per preset against a scripted model:
  * the system prompt each role gets carries the project's reviewed Notes from
  * molab (status active) and none of the proposed ones.
@@ -14,7 +16,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { contentText, FAKE_KEY, FAKE_KEY_ENV, type FakeModel, fakeProviderCommands, startFakeModel } from "../fake-model.js";
+import { contentText, FAKE_KEY, FAKE_KEY_ENV, FAKE_MODEL, FAKE_PROVIDER, type FakeModel, fakeProviderCommands, startFakeModel } from "../fake-model.js";
 import { type FakeMolab, startFakeMolab } from "../fake-molab.js";
 import { BIN, parseDumpRows, REPO_ROOT, spawnTack, tempHome, testEnv, type DumpRow } from "../helpers.js";
 
@@ -48,18 +50,26 @@ function presets(): Map<string, DumpRow> {
   return found;
 }
 
-/** The items of the list under `key` in a row's dumped lines. */
-function listUnder(row: DumpRow, key: string): string[] {
-  const start = row.lines.findIndex((line) => line.trim() === `${key}:`);
-  expect(start, `${row.id} has no ${key}`).toBeGreaterThanOrEqual(0);
-  const indent = row.lines[start]!.search(/\S/);
-  const items: string[] = [];
-  for (const line of row.lines.slice(start + 1)) {
-    const item = /^(\s*)- (.+)$/.exec(line);
-    if (item === null || item[1]!.length < indent) break;
-    items.push(item[2]!.replace(/^['"]|['"]$/g, ""));
-  }
-  return items;
+/** The items of each list under `key` in a row's dumped lines, one array per occurrence. */
+function listsUnder(row: DumpRow, key: string): string[][] {
+  const found: string[][] = [];
+  row.lines.forEach((head, start) => {
+    if (head.trim() !== `${key}:`) return;
+    const indent = head.search(/\S/);
+    const items: string[] = [];
+    for (const line of row.lines.slice(start + 1)) {
+      const item = /^(\s*)- (.+)$/.exec(line);
+      if (item === null || item[1]!.length < indent) break;
+      items.push(item[2]!.replace(/^['"]|['"]$/g, ""));
+    }
+    found.push(items);
+  });
+  return found;
+}
+
+/** A preset's dumped configuration as one string with every run of whitespace a single space. */
+function textOf(row: DumpRow): string {
+  return row.lines.join(" ").replace(/\s+/g, " ");
 }
 
 describe("reproduce plugin", () => {
@@ -67,11 +77,12 @@ describe("reproduce plugin", () => {
     expect(dumpStderr.trim()).toBe("");
   });
 
-  it("lets the orchestrator start exactly the three roles, each a declared preset", () => {
+  it("lets the orchestrator start exactly the three roles, each a declared preset, the reviewers through their own tool", () => {
     const declared = presets();
     const orchestrator = declared.get("reproduce");
     expect(orchestrator, "reproduce preset is missing").toBeDefined();
-    expect([...listUnder(orchestrator!, "allowedAgentPresets")].sort()).toEqual([...ROLES].sort());
+    expect(listsUnder(orchestrator!, "allowedAgentPresets")).toEqual([["reproduce-intake"], ["reproduce-critic", "reproduce-judge"]]);
+    expect(textOf(orchestrator!)).toContain("toolName: review");
     for (const role of ROLES) expect(declared.has(role), role).toBe(true);
   });
 
@@ -122,6 +133,8 @@ describe("reviewed lessons", () => {
   let model: FakeModel;
   let molab: FakeMolab;
   let web: WebHost;
+  /** A second host whose reviewers are routed to a named model. */
+  let reviewed: WebHost;
   let workdir: string;
 
   const seedNote = (name: string, body: string, status: string) =>
@@ -140,22 +153,24 @@ describe("reviewed lessons", () => {
     expect((await seedNote(REVIEWED, "Shift the Born-Mayer repulsion so ion pairs cannot collapse.", "active")).ok).toBe(true);
     expect((await seedNote(PROPOSED, "Derive the cut-off from the actual number of blocks.", "proposed")).ok).toBe(true);
     web = await startWeb(workdir, { MOLAB_URL: molab.url });
+    reviewed = await startWeb(workdir, { MOLAB_URL: molab.url, TACK_REVIEW_PROVIDER: FAKE_PROVIDER, TACK_REVIEW_MODEL: FAKE_MODEL });
   });
 
   afterAll(async () => {
     web.close();
+    reviewed.close();
     await model.close();
     await molab.close();
     rmSync(workdir, { recursive: true, force: true });
   });
 
-  /** The system prompt of the first model request a new session in `preset` makes. */
-  async function instructionsOf(preset: string): Promise<string> {
-    const { workspace } = (await web.call("workspace/create", { request: { path: workdir } })) as { workspace: { workspaceId: string } };
-    const { sessionId } = (await web.call("session/create", { request: { workspaceId: workspace.workspaceId, agentPreset: preset } })) as { sessionId: string };
+  /** The system prompt of the first model request a new session in `preset` makes on `host`. */
+  async function instructionsOf(preset: string, host: WebHost = web): Promise<string> {
+    const { workspace } = (await host.call("workspace/create", { request: { path: workdir } })) as { workspace: { workspaceId: string } };
+    const { sessionId } = (await host.call("session/create", { request: { workspaceId: workspace.workspaceId, agentPreset: preset } })) as { sessionId: string };
     model.script([{ text: "ok" }]);
     const before = model.agentRequests().length;
-    await web.call("session/prompt", { request: { requestId: randomUUID(), sessionId, mode: "queue", content: [{ type: "text", text: "begin" }] } });
+    await host.call("session/prompt", { request: { requestId: randomUUID(), sessionId, mode: "queue", content: [{ type: "text", text: "begin" }] } });
     const deadline = Date.now() + 60_000;
     while (model.agentRequests().length === before) {
       expect(Date.now() < deadline, `${preset} made no model request`).toBe(true);
@@ -173,5 +188,9 @@ describe("reviewed lessons", () => {
       expect(instructions, preset).not.toContain(PROPOSED);
       expect(instructions, preset).not.toContain("Derive the cut-off from the actual number of blocks.");
     }
+  });
+
+  it("mounts the orchestrator when the reviewers are routed to a named model", async () => {
+    expect(await instructionsOf("reproduce", reviewed)).toContain("the reviewers with the review tool");
   });
 });
