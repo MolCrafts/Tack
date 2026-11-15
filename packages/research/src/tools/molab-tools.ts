@@ -2,12 +2,12 @@
  * Molab structure and compute, through the served scope. Molab decides run
  * identity, resume semantics and dispatch; these tools only call its verbs.
  * Starting an attempt is the one step a person approves: the request shows
- * the dry run of what will execute, and nothing starts without an explicit
- * one-shot approval.
+ * the dry run of what will execute and the documents to review first, and
+ * nothing starts without an explicit one-shot approval.
  */
 import { MolabError } from "../molab/client.js";
 import { assetIdOf, executionRef, runRef } from "../molab/refs.js";
-import type { DryRun } from "../molab/schemas.js";
+import type { DryRun, KnowledgeList } from "../molab/schemas.js";
 import { type ApprovalOutcome, clipJson, type ResearchDeps, type ToolSpec } from "./types.js";
 
 const RUN_PARAMS = {
@@ -141,12 +141,35 @@ const NOT_STARTED: Record<Exclude<ApprovalOutcome, "allowed-once">, string> = {
     "no one can approve it here (no approval channel, as in a headless `tack run`, or approvals are off). Show the person the dry run and ask them to start it from a session that can approve.",
 };
 
-/** The request a person approves: which attempt, where, and the dry run of what executes. */
-function approvalReason(args: StartArgs, dry: DryRun): string {
+/** The document classes a person reads before compute: the question, the choices made, and what was seen. */
+const REVIEWED_CLASSES: ReadonlySet<string> = new Set(["Plan", "Decision", "Observation"]);
+
+/**
+ * What the attempt rests on, for the person who approves it: the served
+ * scope's Plans, Decisions and Observations by title and path. It goes into
+ * the approval request only, never into the tool's result, and names no
+ * acceptance criterion (a Milestone).
+ */
+async function reviewList(deps: ResearchDeps, signal: AbortSignal): Promise<string> {
+  let rows: KnowledgeList["notes"];
+  try {
+    rows = (await deps.molab.listKnowledge({}, signal)).notes;
+  } catch (error) {
+    if (!(error instanceof MolabError)) throw error;
+    return `Review before approving: the scope's documents could not be listed (${error.detail}).`;
+  }
+  const reviewed = rows.filter((row) => REVIEWED_CLASSES.has(row.cls)).sort((a, b) => a.cls.localeCompare(b.cls) || a.relPath.localeCompare(b.relPath));
+  if (reviewed.length === 0) return "Review before approving: this scope records no Plan, Decision or Observation.";
+  return ["Review before approving (the question, the choices made, what was observed):", ...reviewed.map((row) => `- ${row.cls}: ${row.title ?? row.name} (${row.relPath})`)].join("\n");
+}
+
+/** The request a person approves: which attempt, where, the dry run of what executes, and what to review first. */
+function approvalReason(args: StartArgs, dry: DryRun, review: string): string {
   const mode = args.mode ?? "initial";
   return [
     `Start a ${mode} attempt of run ${args.run} (${runRef(args.experiment, args.run)}) on target ${args.target ?? "local"}${args.basedOnExecutionId !== undefined ? `, based on attempt ${args.basedOnExecutionId}` : ""}.`,
     describeDryRun(dry),
+    review,
   ].join("\n\n");
 }
 
@@ -156,7 +179,7 @@ export function molabStartExecution(deps: ResearchDeps): ToolSpec<StartArgs> {
     description: [
       "Start one attempt of a run through molab: to this machine by default (target local), or to a registered compute target via molq.",
       "mode: initial for a new run; resume continues a failed attempt from its completed nodes; rerun recomputes; reproduce checks a succeeded one.",
-      "The person is asked to approve it first, shown the dry run of the experiment's workflow; without their approval nothing starts.",
+      "The person is asked to approve it first, shown the dry run of the experiment's workflow and the Plans, Decisions and Observations to review; without their approval nothing starts.",
       "Compute takes time: after it starts, schedule a check rather than polling.",
     ].join(" "),
     parameters: {
@@ -167,7 +190,7 @@ export function molabStartExecution(deps: ResearchDeps): ToolSpec<StartArgs> {
     },
     async execute(args, exec) {
       const dry = await dryRunOf(deps, args.project, args.experiment, "code", exec.signal);
-      const outcome = exec.approve === undefined ? "unavailable" : await exec.approve(approvalReason(args, dry));
+      const outcome = exec.approve === undefined ? "unavailable" : await exec.approve(approvalReason(args, dry, await reviewList(deps, exec.signal)));
       if (outcome !== "allowed-once") throw new Error(`Not started: ${NOT_STARTED[outcome]}`);
       const at = { project: args.project, experiment: args.experiment, run: args.run };
       const execution = await deps.molab.createExecution(

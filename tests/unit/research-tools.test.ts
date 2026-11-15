@@ -126,6 +126,36 @@ describe("molab_start_execution asks the person first", () => {
     expect(value.text).toContain(executionRef(at.experiment, at.run, "e01"));
   });
 
+  it("shows the person the Plans, Decisions and Observations the attempt rests on, never an acceptance criterion", async () => {
+    const source = [`molab:experiment/${at.experiment}`];
+    const write = (cls: string, name: string, body: string) => h.call("molab_write_knowledge", { cls, name, body, host: "experiments/screen", sources: source });
+    await write("Plan", "spec", "Reproduce Fig. 2 of the paper.");
+    await write("Decision", "Hydroxide force field", "Literature parameters, not GAFF.");
+    await write("Observation", "Source discrepancy: Table 1 units", "Level II: the table and the text disagree.");
+    await write("Milestone", "Fig. 2 conductivity", "expected 43.6 within 5%");
+
+    await h.call("molab_start_execution", at, { approval: "allowed-once" });
+
+    const reason = h.asked[0]!.reason!;
+    expect(reason).toContain("Review before approving");
+    expect(reason).toContain("- Plan: spec (experiments/screen/knowledges/spec.md)");
+    expect(reason).toContain("- Decision: Hydroxide force field (experiments/screen/knowledges/hydroxide-force-field.md)");
+    expect(reason).toContain("- Observation: Source discrepancy: Table 1 units (experiments/screen/knowledges/source-discrepancy-table-1-units.md)");
+    expect(reason).not.toContain("Fig. 2 conductivity");
+    expect(reason).not.toContain("43.6");
+  });
+
+  it("tells the person when the scope records no Plan or Decision to review", async () => {
+    await h.call("molab_start_execution", at, { approval: "allowed-once" });
+    expect(h.asked[0]!.reason).toContain("Review before approving: this scope records no Plan, Decision or Observation.");
+  });
+
+  it("does not hand the review list to the model", async () => {
+    await h.call("molab_write_knowledge", { cls: "Plan", name: "spec", body: "Reproduce Fig. 2.", host: "experiments/screen", sources: [`molab:experiment/${at.experiment}`] });
+    const value = await h.call("molab_start_execution", at, { approval: "allowed-once" });
+    expect(value.text).not.toContain("Review before approving");
+  });
+
   for (const [outcome, message] of [["rejected", /declined/], ["cancelled", /withdrawn/], ["unavailable", /no one can approve/]] as const) {
     it(`starts nothing when the approval is ${outcome}`, async () => {
       await expect(h.call("molab_start_execution", at, { approval: outcome })).rejects.toThrow(message);
