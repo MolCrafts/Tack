@@ -11,14 +11,12 @@
  * molab (status active) and none of the proposed ones.
  */
 import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
-import { spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { contentText, FAKE_KEY, FAKE_KEY_ENV, FAKE_MODEL, FAKE_PROVIDER, type FakeModel, fakeProviderCommands, startFakeModel } from "../fake-model.js";
+import { FAKE_KEY, FAKE_KEY_ENV, FAKE_MODEL, FAKE_PROVIDER, type FakeModel, fakeProviderCommands, startFakeModel } from "../fake-model.js";
 import { type FakeMolab, startFakeMolab } from "../fake-molab.js";
-import { BIN, parseDumpRows, REPO_ROOT, spawnTack, tempHome, testEnv, type DumpRow } from "../helpers.js";
+import { agentPresets, instructionsOf, listsUnder, parseDumpRows, REPO_ROOT, spawnTack, startWeb, tempHome, textOf, type DumpRow, type WebHost } from "../helpers.js";
 
 const PROFILE = "research";
 const ROLES = ["reproduce-intake", "reproduce-critic", "reproduce-judge"];
@@ -40,37 +38,7 @@ beforeAll(async () => {
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 
 /** Agent presets in the composition, by their preset id. */
-function presets(): Map<string, DumpRow> {
-  const found = new Map<string, DumpRow>();
-  for (const row of rows) {
-    if (row.name !== "@deepseek-ai/dsh-agent-preset" || row.disabled !== undefined) continue;
-    const id = row.lines.map((line) => /^ {4}id: (.+)$/.exec(line)?.[1]).find((value) => value !== undefined);
-    if (id !== undefined) found.set(id, row);
-  }
-  return found;
-}
-
-/** The items of each list under `key` in a row's dumped lines, one array per occurrence. */
-function listsUnder(row: DumpRow, key: string): string[][] {
-  const found: string[][] = [];
-  row.lines.forEach((head, start) => {
-    if (head.trim() !== `${key}:`) return;
-    const indent = head.search(/\S/);
-    const items: string[] = [];
-    for (const line of row.lines.slice(start + 1)) {
-      const item = /^(\s*)- (.+)$/.exec(line);
-      if (item === null || item[1]!.length < indent) break;
-      items.push(item[2]!.replace(/^['"]|['"]$/g, ""));
-    }
-    found.push(items);
-  });
-  return found;
-}
-
-/** A preset's dumped configuration as one string with every run of whitespace a single space. */
-function textOf(row: DumpRow): string {
-  return row.lines.join(" ").replace(/\s+/g, " ");
-}
+const presets = () => agentPresets(rows);
 
 describe("reproduce plugin", () => {
   it("composes into the research profile without warnings", () => {
@@ -91,41 +59,6 @@ describe("reproduce plugin", () => {
     for (const role of ROLES) expect(declared.get(role)!.lines.join("\n"), role).not.toContain("dsh-tool-subagent");
   });
 });
-
-/** A `tack web` host and an authenticated caller of its client API. */
-interface WebHost {
-  call(method: string, args: Record<string, unknown>): Promise<Record<string, unknown>>;
-  close(): void;
-}
-
-async function startWeb(cwd: string, env: NodeJS.ProcessEnv): Promise<WebHost> {
-  const child: ChildProcess = spawn(process.execPath, [BIN, "web", "--profile", PROFILE, "--port", "0", "--no-open"], { cwd, env: testEnv(home, env) });
-  const entry = await new Promise<string>((resolve, reject) => {
-    let out = "";
-    child.stdout!.on("data", (chunk: Buffer) => {
-      out += chunk.toString();
-      const url = /(http:\/\/\S+\?token=\S+)/.exec(out)?.[1];
-      if (url !== undefined) resolve(url);
-    });
-    child.on("close", (code) => reject(new Error(`tack web exited (${code}) before serving: ${out}`)));
-  });
-  const login = await fetch(entry, { redirect: "manual" });
-  const cookie = login.headers.getSetCookie().map((line) => line.split(";")[0]).join("; ");
-  const origin = new URL(entry).origin;
-  return {
-    async call(method, args) {
-      const response = await fetch(`${origin}/api/${method}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", cookie },
-        body: JSON.stringify({ type: "client-request", rpcId: randomUUID(), method, payload: { args } }),
-      });
-      const body = (await response.json()) as { result?: { ok: boolean; value?: Record<string, unknown> } };
-      if (body.result?.ok !== true) throw new Error(`${method} failed: ${JSON.stringify(body)}`);
-      return body.result.value!;
-    },
-    close: () => child.kill(),
-  };
-}
 
 describe("reviewed lessons", () => {
   const REVIEWED = "Bound the short-range potential before a long hot steady state";
@@ -152,8 +85,8 @@ describe("reviewed lessons", () => {
     molab = await startFakeMolab();
     expect((await seedNote(REVIEWED, "Shift the Born-Mayer repulsion so ion pairs cannot collapse.", "active")).ok).toBe(true);
     expect((await seedNote(PROPOSED, "Derive the cut-off from the actual number of blocks.", "proposed")).ok).toBe(true);
-    web = await startWeb(workdir, { MOLAB_URL: molab.url });
-    reviewed = await startWeb(workdir, { MOLAB_URL: molab.url, TACK_REVIEW_PROVIDER: FAKE_PROVIDER, TACK_REVIEW_MODEL: FAKE_MODEL });
+    web = await startWeb(home, PROFILE, workdir, { MOLAB_URL: molab.url });
+    reviewed = await startWeb(home, PROFILE, workdir, { MOLAB_URL: molab.url, TACK_REVIEW_PROVIDER: FAKE_PROVIDER, TACK_REVIEW_MODEL: FAKE_MODEL });
   });
 
   afterAll(async () => {
@@ -164,25 +97,11 @@ describe("reviewed lessons", () => {
     rmSync(workdir, { recursive: true, force: true });
   });
 
-  /** The system prompt of the first model request a new session in `preset` makes on `host`. */
-  async function instructionsOf(preset: string, host: WebHost = web): Promise<string> {
-    const { workspace } = (await host.call("workspace/create", { request: { path: workdir } })) as { workspace: { workspaceId: string } };
-    const { sessionId } = (await host.call("session/create", { request: { workspaceId: workspace.workspaceId, agentPreset: preset } })) as { sessionId: string };
-    model.script([{ text: "ok" }]);
-    const before = model.agentRequests().length;
-    await host.call("session/prompt", { request: { requestId: randomUUID(), sessionId, mode: "queue", content: [{ type: "text", text: "begin" }] } });
-    const deadline = Date.now() + 60_000;
-    while (model.agentRequests().length === before) {
-      expect(Date.now() < deadline, `${preset} made no model request`).toBe(true);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    const request = model.agentRequests()[before]!;
-    return request.messages.filter((message) => message.role === "system").map((message) => contentText(message.content)).join("\n");
-  }
+  const instructionsFor = (preset: string, host: WebHost = web) => instructionsOf(host, model, workdir, preset);
 
   it("puts the reviewed Notes into every role's instructions, and no proposed one", async () => {
     for (const preset of ["reproduce", ...ROLES]) {
-      const instructions = await instructionsOf(preset);
+      const instructions = await instructionsFor(preset);
       expect(instructions, preset).toContain(REVIEWED);
       expect(instructions, preset).toContain("Shift the Born-Mayer repulsion so ion pairs cannot collapse.");
       expect(instructions, preset).not.toContain(PROPOSED);
@@ -191,6 +110,6 @@ describe("reviewed lessons", () => {
   });
 
   it("mounts the orchestrator when the reviewers are routed to a named model", async () => {
-    expect(await instructionsOf("reproduce", reviewed)).toContain("the reviewers with the review tool");
+    expect(await instructionsFor("reproduce", reviewed)).toContain("the reviewers with the review tool");
   });
 });
