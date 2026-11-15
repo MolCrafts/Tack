@@ -237,6 +237,13 @@ describe("knowledge documents", () => {
     expect(doc.sources).toEqual(["https://doi.org/10.1021/ma000000"]);
   });
 
+  it("writes a Manuscript as the whole LaTeX paper, which molab stores as .tex", async () => {
+    const paper = "\\documentclass{revtex4-2}\n\\begin{document}\nShear thinning~\\cite{petravic2003}.\n\\end{document}\n";
+    const value = await h.call("molab_write_knowledge", { cls: "Manuscript", name: "NaCl NEMD", body: paper });
+    expect(value.text).toBe("Wrote Manuscript knowledges/nacl-nemd.tex.");
+    expect(h.molab.docs.get("knowledges/nacl-nemd.tex")!.body).toBe(paper);
+  });
+
   it("hands molab's refusal back to the agent and writes nothing", async () => {
     await expect(h.call("molab_write_knowledge", { cls: "Finding", name: "AABB wins", body: "AABB conducts better.", sources: ["https://doi.org/10.1/x"] })).rejects.toThrow(/knowledge\.unanchored/);
     await expect(h.call("molab_write_knowledge", { cls: "Note", name: "Dangling", body: "x", sources: ["knowledges/missing.md"] })).rejects.toThrow(/names nothing/);

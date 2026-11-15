@@ -23,13 +23,14 @@ export function molabWriteKnowledge(deps: ResearchDeps): ToolSpec<WriteArgs> {
     description: [
       `Write a molab knowledge document: ${KNOWLEDGE_CLASSES.join(", ")}. Writing the same name under the same host rewrites that document in place (molab keeps the history), so keep names stable: no date or version in them.`,
       "The body is Markdown that molab renders; molab: refs in it become links (an asset ref opens the asset, a structure in MolVis). Never link a page served from this machine and never write HTML.",
+      "A Manuscript is the exception: its body is the whole LaTeX paper, stored as <name>.tex and compiled as it stands; each \\cite{key} names a Literature document (its file name, in the same host or one above), and `molab knowledge bib` writes the bibliography from them.",
       "List what it rests on in sources: molab: refs (asset, run, execution, experiment), URLs or DOIs, workspace files, and other knowledge document paths. A Report or Finding cites at least one asset, run or execution.",
       "molab refuses a document that breaks one of its rules and says which; fix the write from that message.",
     ].join(" "),
     parameters: {
       cls: { type: "string", required: true, enum: [...KNOWLEDGE_CLASSES] },
       name: { type: "string", required: true, description: "Document name; the same name under the same host rewrites it." },
-      body: { type: "string", required: true, description: "The narrative, in Markdown." },
+      body: { type: "string", required: true, description: "The narrative, in Markdown; for a Manuscript, the LaTeX paper." },
       host: {
         type: "string",
         description:
@@ -40,7 +41,7 @@ export function molabWriteKnowledge(deps: ResearchDeps): ToolSpec<WriteArgs> {
         type: "object",
         additionalProperties: true,
         description:
-          "The structured fields its class declares, and no others: Literature title, authors, year, doi, venue, url, pdf_asset_id; Hypothesis verdict (open, supported, refuted, unsettled); Decision status (open while it waits for a person, made); Todo items [{id, title, status: open|done|blocked, stage?}]; Roadmap stages [{id, title, experiment?, depends_on?}]; Milestone criterion, status (open, met, missed), stage?; Note status.",
+          "The structured fields its class declares, and no others: Literature title, authors, year, doi, venue, url, pdf_asset_id; Hypothesis verdict (open, supported, refuted, unsettled); Decision status (open while it waits for a person, made); Todo items [{id, title, status: open|done|blocked, stage?}]; Roadmap stages [{id, title, experiment?, depends_on?}]; Milestone criterion, status (open, met, missed), stage?; Note status. A Manuscript declares none.",
       },
     },
     async execute(args, exec) {

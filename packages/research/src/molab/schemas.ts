@@ -97,5 +97,5 @@ export const DryRun = z.looseObject({
 export type DryRun = z.infer<typeof DryRun>;
 
 /** The knowledge classes molab writes. */
-export const KNOWLEDGE_CLASSES = ["Note", "Literature", "Report", "Finding", "Plan", "Roadmap", "Todo", "Milestone", "Observation", "Hypothesis", "Decision"] as const;
+export const KNOWLEDGE_CLASSES = ["Note", "Literature", "Report", "Finding", "Plan", "Roadmap", "Todo", "Milestone", "Observation", "Hypothesis", "Decision", "Manuscript"] as const;
 export type KnowledgeClass = (typeof KNOWLEDGE_CLASSES)[number];

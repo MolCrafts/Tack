@@ -207,13 +207,13 @@ export async function startFakeMolab(root = "/tmp/fake-ws/projects/polymer"): Pr
       const relPath = url.searchParams.get("path") ?? "";
       const doc = docs.get(relPath);
       if (doc === undefined) return fail(404, `note ${JSON.stringify(relPath)} not found`);
-      return send(200, { name: doc.name, relPath, cls: doc.cls, body: doc.body, links: [], cards: [], fields: doc.fields, format: "md" });
+      return send(200, { name: doc.name, relPath, cls: doc.cls, body: doc.body, links: [], cards: [], fields: doc.fields, format: doc.cls === "Manuscript" ? "tex" : "md" });
     }
     if (method === "POST" && path === "/api/knowledge/doc") {
       const name = String(body?.name);
       const hostPath = String(body?.hostPath ?? "");
-      const relPath = `${hostPath === "" ? "" : `${hostPath}/`}knowledges/${slug(name)}.md`;
       const cls = String(body?.cls ?? "Note");
+      const relPath = `${hostPath === "" ? "" : `${hostPath}/`}knowledges/${slug(name)}.${cls === "Manuscript" ? "tex" : "md"}`;
       const sources = (body?.sources as string[] | undefined) ?? [];
       const cites = ((body?.cites as { target: string; role?: string }[] | undefined) ?? []).map((cite) => ({ target: cite.target, role: cite.role ?? "cites" }));
       const fields = (body?.fields as Record<string, unknown> | undefined) ?? {};
